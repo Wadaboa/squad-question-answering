@@ -60,7 +60,7 @@ class SquadDataset:
         "title",
         "context_id",
         "context",
-        "text",
+        "answer",
         "answer_start",
         "answer_end",
     ]
@@ -68,13 +68,10 @@ class SquadDataset:
 
     def __init__(
         self,
-        max_question_tokens,
-        max_context_tokens,
         df_percentage=1.0,
         question_preprocessor=None,
         context_preprocessor=None,
         val_split=0.2,
-        batch_size=10,
     ):
         # Save instance variables
         self.df_percentage = df_percentage
@@ -100,36 +97,12 @@ class SquadDataset:
         if self.df_percentage < 1.0:
             self.dataframe = self._get_portion(self.dataframe)
 
-        # Preprocess the dataframe
-        if (
-            self.question_preprocessor is not None
-            or self.context_preprocessor is not None
-        ):
-            self.dataframe = self._preprocess(self.dataframe)
-
         # Split the DataFrame into train/validation
         self.train_df, self.val_df = self._train_val_split(self.dataframe)
 
         # Save PyTorch Dataset instances
         self.train_dataset = SquadTorchDataset(self.train_df)
         self.val_dataset = SquadTorchDataset(self.val_df)
-
-        # Declare PyTorch DataLoader instances
-        collate_fn = partial(
-            pad_batch,
-            padding_index=0,
-            max_question_tokens=max_question_tokens,
-            max_context_tokens=max_context_tokens,
-        )
-        default_dataloader = partial(
-            DataLoader,
-            batch_size=batch_size,
-            shuffle=True,
-            collate_fn=collate_fn,
-            pin_memory=True,
-        )
-        self.train_dataloader = default_dataloader(self.train_dataset)
-        self.val_dataloader = default_dataloader(self.val_dataset)
 
     def _add_end_index(self, df):
         """
@@ -140,7 +113,7 @@ class SquadDataset:
         """
         ans_end = []
         for index, row in df.iterrows():
-            t = row.text
+            t = row.answer
             s = row.answer_start
             ans_end.append(s + len(t))
         df["answer_end"] = ans_end
@@ -154,13 +127,13 @@ class SquadDataset:
         file = json.loads(open(self.training_set_path).read())
 
         # Flatten JSON
-        js = pd.io.json.json_normalize(
+        js = pd.json_normalize(
             file, self.JSON_RECORD_PATH, meta=[["data", "title"]]
         )
-        m = pd.io.json.json_normalize(
+        m = pd.json_normalize(
             file, self.JSON_RECORD_PATH[:-1], meta=[["data", "title"]]
         )
-        r = pd.io.json.json_normalize(
+        r = pd.json_normalize(
             file, self.JSON_RECORD_PATH[:-2], meta=[["data", "title"]]
         )
 
@@ -175,13 +148,19 @@ class SquadDataset:
             sort=False,
         ).reset_index()
         df["context_id"] = df["context"].factorize()[0]
-        df.rename(columns={"data.title": "title"}, inplace=True)
+        
+        # Rename columns
+        df.rename(columns={"data.title": "title", "text": "answer"}, inplace=True)
 
         # Add end index for answers in DataFrame
         df = self._add_end_index(df)
 
         # Order columns
-        df = df[self.COLUMNS[-1]]
+        df = df[self.COLUMNS]
+        
+        # Save the dataframe to a pickle file
+        df.to_pickle(self.dataframe_path)
+        
         return df
 
     def _preprocess(self, df):
