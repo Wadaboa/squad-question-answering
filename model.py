@@ -5,7 +5,12 @@ from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_se
 
 class QABaselineModel(nn.Module):
     def __init__(
-        self, embedding_module, num_recurrent_layers=2, bidirectional=False, dropout=0.2
+        self,
+        embedding_module,
+        max_context_tokens,
+        num_recurrent_layers=2,
+        bidirectional=False,
+        dropout=0.2,
     ):
         """
         Build a generic question answering model, with recurrent modules
@@ -27,7 +32,16 @@ class QABaselineModel(nn.Module):
         )
 
         # Classification layer
-        self.classifier = nn.Linear(self.embedding_dimension * 2, 2)
+        self.start_classifier = nn.Linear(
+            self.embedding_dimension * 2, max_context_tokens
+        )
+        self.end_classifier = nn.Linear(
+            self.embedding_dimension * 2, max_context_tokens
+        )
+
+        # Loss criterion
+        self.softmax = nn.LogSoftmax(dim=1)
+        self.criterion = nn.NLLLoss(ignore_index=-1)
 
         # Transfer model to device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -76,14 +90,29 @@ class QABaselineModel(nn.Module):
         Perform a forward pass and return predictions over
         a mini-batch of sequences of the same lenght
         """
-        embedded_questions = self.embedding(inputs["question_ids"])
-        embedded_contexts = self.embedding(inputs["context_ids"])
+        embedded_questions = self.embedding(inputs["question_ids"].to(self.device))
+        embedded_contexts = self.embedding(inputs["context_ids"].to(self.device))
         sentence_questions, sentence_contexts = self._sentence_embedding(
             embedded_questions,
             embedded_contexts,
-            inputs["question_lenghts"],
-            inputs["context_lenghts"],
+            inputs["question_lenghts"].to(self.device),
+            inputs["context_lenghts"].to(self.device),
         )
         merged_inputs = self._merge_embeddings(sentence_questions, sentence_contexts)
-        predictions = self.classifier(merged_inputs)
-        return predictions
+        start_probs = self.softmax(self.start_classifier(merged_inputs))
+        end_probs = self.softmax(self.end_classifier(merged_inputs))
+        start_indexes = start_probs.argmax(dim=1, keepdims=True)
+        end_indexes = end_probs.argmax(dim=1, keepdims=True)
+
+        word_start_indexes = torch.gather(
+            inputs["context_offsets"][:, :, 0], 1, start_indexes
+        )
+        word_end_indexes = torch.gather(
+            inputs["context_offsets"][:, :, 1], 1, end_indexes
+        )
+        outputs = torch.cat([word_start_indexes, word_end_indexes], dim=1)
+
+        start_loss = self.criterion(start_probs, inputs["answer_start"].to(self.device))
+        end_loss = self.criterion(end_probs, inputs["answer_end"].to(self.device))
+
+        return {"loss": start_loss + end_loss, "outputs": outputs}
