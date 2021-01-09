@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 
 
@@ -116,3 +117,105 @@ class QABaselineModel(nn.Module):
         end_loss = self.criterion(end_probs, inputs["answer_end"].to(self.device))
 
         return {"loss": start_loss + end_loss, "outputs": outputs}
+
+
+class Highway(nn.Module):
+    def __init__(self, size, nonlinearity=nn.ReLU, gate_activation=F.sigmoid):
+        super(Highway, self).__init__()
+        self.size = size
+        self.nonlinearity = nonlinearity
+        self.gate_activation = gate_activation
+
+        self.linear = nn.Sequential(nn.Linear(size, size), self.nonlinearity)
+        self.gate = nn.Sequential(nn.Linear(size, size), self.gate_activation)
+
+    def forward(self, x):
+        h = self.linear(x)
+        g = self.gate(x)
+        return g * h + (1 - g) * x
+
+
+def get_highway(num_layers, size, nonlinearity=nn.ReLU, gate_activation=F.sigmoid):
+    highway = []
+    for _ in range(num_layers):
+        highway.append(
+            Highway(size, nonlinearity=nonlinearity, gate_activation=gate_activation)
+        )
+    return nn.Sequential(*highway)
+
+
+class AttentionFlow(nn.Module):
+    
+    def __init__(self, size):
+        self.size = size
+        self.similarity = nn.Linear(3 * size, 1)
+        
+    def forward(self, questions, contexts):
+        torch.transpose(questions, 1, 2)
+        contexts, questions, contexts * questions
+
+
+class CustomBiDAFModel(nn.Module):
+    def __init__(
+        self,
+        embedding_module,
+        max_context_tokens,
+        highway_depth=2
+        num_recurrent_layers=2,
+        bidirectional=False,
+        dropout=0.2,
+    ):
+        """
+        
+        """
+        super().__init__()
+
+        # Embedding module
+        self.word_embedding = embedding_module
+        self.word_embedding_dimension = embedding_module.weight.shape[-1]
+        
+        # Highway network
+        self.highway_depth = highway_depth
+        self.highway = get_highway(self.highway_depth, self.word_embedding_dimension)
+        
+        # Contextual embeddings
+        self.contextual_embedding = nn.LSTM(
+            self.word_embedding_dimension,
+            self.word_embedding_dimension,
+            batch_first=True,
+            num_layers=num_recurrent_layers,
+            bidirectional=bidirectional,
+            dropout=dropout,
+        )
+        
+        # Classification layer
+        self.start_classifier = nn.Linear(
+            self.embedding_dimension * 2, max_context_tokens
+        )
+        self.end_classifier = nn.Linear(
+            self.embedding_dimension * 2, max_context_tokens
+        )
+
+        # Loss criterion
+        self.softmax = nn.LogSoftmax(dim=1)
+        self.criterion = nn.NLLLoss(ignore_index=-1)
+
+        # Transfer model to device
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.to(self.device)
+
+    def count_parameters(self):
+        """
+        Return the total number of trainable parameters in the model
+        """
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+    
+    def forward(self, **inputs):
+        embedded_questions = self.embedding(inputs["question_ids"].to(self.device))
+        embedded_contexts = self.embedding(inputs["context_ids"].to(self.device))
+        
+        highway_questions = self.highway(embedded_questions)
+        highway_contexts = self.highway(embedded_contexts)
+        
+        contextual_questions = self.contextual_embedding(highway_questions)
+        contextual_contexts = self.contextual_embedding(highway_contexts)
