@@ -4,6 +4,16 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 
 
+def get_qa_outputs(start_probs, end_probs, context_offsets):
+    start_indexes = start_probs.argmax(dim=1, keepdims=True)
+    end_indexes = end_probs.argmax(dim=1, keepdims=True)
+
+    word_start_indexes = torch.gather(context_offsets[:, :, 0], 1, start_indexes)
+    word_end_indexes = torch.gather(context_offsets[:, :, 1], 1, end_indexes)
+
+    return torch.cat([word_start_indexes, word_end_indexes], dim=1)
+
+
 class QABaselineModel(nn.Module):
     def __init__(
         self,
@@ -102,19 +112,11 @@ class QABaselineModel(nn.Module):
         merged_inputs = self._merge_embeddings(sentence_questions, sentence_contexts)
         start_probs = self.softmax(self.start_classifier(merged_inputs))
         end_probs = self.softmax(self.end_classifier(merged_inputs))
-        start_indexes = start_probs.argmax(dim=1, keepdims=True)
-        end_indexes = end_probs.argmax(dim=1, keepdims=True)
-
-        word_start_indexes = torch.gather(
-            inputs["context_offsets"][:, :, 0], 1, start_indexes
-        )
-        word_end_indexes = torch.gather(
-            inputs["context_offsets"][:, :, 1], 1, end_indexes
-        )
-        outputs = torch.cat([word_start_indexes, word_end_indexes], dim=1)
 
         start_loss = self.criterion(start_probs, inputs["answer_start"].to(self.device))
         end_loss = self.criterion(end_probs, inputs["answer_end"].to(self.device))
+
+        outputs = get_qa_outputs(start_probs, end_probs, inputs["context_offsets"])
 
         return {"loss": start_loss + end_loss, "outputs": outputs}
 
@@ -210,7 +212,7 @@ class BiDAFModel(nn.Module):
         self,
         embedding_module,
         highway_depth=2,
-        dropout=0.2,
+        dropout_rate=0.2,
         contextual_recurrent_layers=2,
         contextual_bidirectional=False,
     ):
@@ -227,6 +229,10 @@ class BiDAFModel(nn.Module):
         self.highway_depth = highway_depth
         self.highway = get_highway(self.highway_depth, self.word_embedding_dimension)
 
+        # Dropout module
+        self.dropout_rate = dropout_rate
+        self.dropout = nn.Dropout(self.dropout_rate)
+
         # Contextual embeddings
         self.contextual_embedding = nn.LSTM(
             self.word_embedding_dimension,
@@ -234,7 +240,7 @@ class BiDAFModel(nn.Module):
             batch_first=True,
             num_layers=contextual_recurrent_layers,
             bidirectional=contextual_bidirectional,
-            dropout=dropout,
+            dropout=self.dropout_rate if contextual_recurrent_layers > 1 else 0.0,
         )
 
         # Attention flow
@@ -247,7 +253,7 @@ class BiDAFModel(nn.Module):
             batch_first=True,
             bidirectional=True,
             num_layers=2,
-            dropout=dropout,
+            dropout=self.dropout_rate,
         )
 
         self.out_lstm = nn.LSTM(
@@ -255,7 +261,6 @@ class BiDAFModel(nn.Module):
             self.word_embedding_dimension,
             batch_first=True,
             bidirectional=True,
-            dropout=dropout,
         )
 
         self.start_classifier = nn.Linear(
@@ -264,7 +269,6 @@ class BiDAFModel(nn.Module):
         self.end_classifier = nn.Linear(
             6 * self.word_embedding_dimension, 1, bias=False
         )
-        self.dropout = nn.Dropout(dropout)
 
         # Loss criterion
         self.softmax = nn.LogSoftmax(dim=1)
@@ -287,28 +291,32 @@ class BiDAFModel(nn.Module):
         highway_questions = self.highway(embedded_questions)
         highway_contexts = self.highway(embedded_contexts)
 
-        contextual_questions, _ = self.contextual_embedding(highway_questions)
-        contextual_contexts, _ = self.contextual_embedding(highway_contexts)
+        contextual_questions, _ = self.dropout(
+            self.contextual_embedding(highway_questions)
+        )
+        contextual_contexts, _ = self.dropout(
+            self.contextual_embedding(highway_contexts)
+        )
 
         query_aware_contexts = self.attention(contextual_questions, contextual_contexts)
 
-        modeling, _ = self.modeling_layer(query_aware_contexts)
+        modeling, _ = self.dropout(self.modeling_layer(query_aware_contexts))
 
         start_indexes = self.start_classifier(
             torch.cat([query_aware_contexts, modeling], dim=-1)
         ).squeeze(-1)
-        start_indexes_probs = self.softmax(self.dropout(start_indexes))
+        start_probs = self.softmax(self.dropout(start_indexes))
 
-        m2, _ = self.out_lstm(modeling)
+        m2, _ = self.dropout(self.out_lstm(modeling))
 
-        end_indexes = self.end_classifier(torch.cat([query_aware_contexts, m2], dim=-1)).squeeze(-1)
-        end_indexes_probs = self.softmax(self.dropout(end_indexes))
-        
-        start_loss = self.criterion(
-            start_indexes_probs, inputs["answer_start"].to(self.device)
-        )
-        end_loss = self.criterion(
-            end_indexes_probs, inputs["answer_end"].to(self.device)
-        )
+        end_indexes = self.end_classifier(
+            torch.cat([query_aware_contexts, m2], dim=-1)
+        ).squeeze(-1)
+        end_probs = self.softmax(self.dropout(end_indexes))
 
-        return {"loss": start_loss + end_loss}  # , "outputs": outputs}
+        start_loss = self.criterion(start_probs, inputs["answer_start"].to(self.device))
+        end_loss = self.criterion(end_probs, inputs["answer_end"].to(self.device))
+
+        outputs = get_qa_outputs(start_probs, end_probs, inputs["context_offsets"])
+
+        return {"loss": start_loss + end_loss, "outputs": outputs}
