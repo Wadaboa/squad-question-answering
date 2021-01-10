@@ -120,14 +120,10 @@ class QABaselineModel(nn.Module):
 
 
 class Highway(nn.Module):
-    def __init__(self, size, nonlinearity=nn.ReLU, gate_activation=F.sigmoid):
-        super(Highway, self).__init__()
-        self.size = size
-        self.nonlinearity = nonlinearity
-        self.gate_activation = gate_activation
-
-        self.linear = nn.Sequential(nn.Linear(size, size), self.nonlinearity)
-        self.gate = nn.Sequential(nn.Linear(size, size), self.gate_activation)
+    def __init__(self, size, nonlinearity=nn.ReLU, gate_activation=nn.Sigmoid):
+        super().__init__()
+        self.linear = nn.Sequential(nn.Linear(size, size), nonlinearity())
+        self.gate = nn.Sequential(nn.Linear(size, size), gate_activation())
 
     def forward(self, x):
         h = self.linear(x)
@@ -135,7 +131,7 @@ class Highway(nn.Module):
         return g * h + (1 - g) * x
 
 
-def get_highway(num_layers, size, nonlinearity=nn.ReLU, gate_activation=F.sigmoid):
+def get_highway(num_layers, size, nonlinearity=nn.ReLU, gate_activation=nn.Sigmoid):
     highway = []
     for _ in range(num_layers):
         highway.append(
@@ -146,59 +142,77 @@ def get_highway(num_layers, size, nonlinearity=nn.ReLU, gate_activation=F.sigmoi
 
 class AttentionFlow(nn.Module):
     def __init__(self, size):
+        super().__init__()
         self.size = size
         self.similarity = nn.Linear(3 * size, 1, bias=False)
         self.query_aware_context = nn.Linear(4 * size, 4 * size)
-    
-    def get_similarity_input(self, questions, contexts)
+
+    def get_similarity_input(self, questions, contexts):
         questions_shape = questions.shape
         contexts_shape = contexts.shape
         assert questions_shape[0] == contexts_shape[0], "Batch size must be equal"
         assert questions_shape[2] == contexts_shape[2], "Embedding size must be equal"
+        view_shape = (
+            questions_shape[0],
+            contexts_shape[1],
+            questions_shape[1],
+            questions_shape[2],
+        )
         input_sim_shape = view_shape[:-1] + (questions_shape[2] * 3,)
-        view_shape = (questions_shape[0], contexts_shape[1], questions_shape[1], questions_shape[2])
         input_sim = torch.cat(
             [
-                torch.repeat_interleave(contexts, questions_shape[1], dim=1).view(*view_shape),
+                torch.repeat_interleave(contexts, questions_shape[1], dim=1).view(
+                    *view_shape
+                ),
                 questions.repeat(1, contexts_shape[1], 1).view(*view_shape),
                 torch.einsum("bcd, bqd->bcqd", contexts, questions),
             ],
             dim=3,
         )
-        assert input_sim.shape == input_sim_shape, f"Wrong similarity matrix input shape {input_sim.shape}"
+        assert (
+            input_sim.shape == input_sim_shape
+        ), f"Wrong similarity matrix input shape {input_sim.shape}"
         return input_sim
-    
+
     def context_to_query(self, sim, questions):
-        return torch.bmm(F.softmax(sim, dim=1), questions).transpose(1,2)
-    
+        return torch.bmm(F.softmax(sim, dim=2), questions)
+
     def query_to_context(self, sim, contexts):
-        sim_max_col = sim.max(dim=1, keepdims=True)
-        attention_weights = F.softmax(sim_max_col.values, dim=0)
-        return torch.bmm(attention_weights.transpose(1,2), contexts).repeat(1, contexts.shape[1], 1)
-    
+        sim_max_col = sim.max(dim=2, keepdims=True)
+        attention_weights = F.softmax(sim_max_col.values, dim=1)
+        return torch.bmm(attention_weights.transpose(1, 2), contexts).repeat(
+            1, contexts.shape[1], 1
+        )
+
     def forward(self, questions, contexts):
         input_sim = self.get_similarity_input(questions, contexts)
-        
+
         # S
         sim = self.similarity(input_sim).squeeze(-1)
-        
+
         # U tilde
-        ctq = self.context_to_query(sim, questions)
-        
+        u_tilde = self.context_to_query(sim, questions)
+
         # H tilde
-        qtc = self.query_to_context(sim, contexts)
-        
+        h_tilde = self.query_to_context(sim, contexts)
+
+        # Megamerge
+        megamerge = torch.cat(
+            [contexts, u_tilde, u_tilde * contexts, h_tilde * contexts], dim=2
+        )
+        g = self.query_aware_context(megamerge)
+
+        return g
 
 
-class CustomBiDAFModel(nn.Module):
+class BiDAFModel(nn.Module):
     def __init__(
         self,
         embedding_module,
-        max_context_tokens,
         highway_depth=2,
-        num_recurrent_layers=2,
-        bidirectional=False,
         dropout=0.2,
+        contextual_recurrent_layers=2,
+        contextual_bidirectional=False,
     ):
         """
         
@@ -218,18 +232,39 @@ class CustomBiDAFModel(nn.Module):
             self.word_embedding_dimension,
             self.word_embedding_dimension,
             batch_first=True,
-            num_layers=num_recurrent_layers,
-            bidirectional=bidirectional,
+            num_layers=contextual_recurrent_layers,
+            bidirectional=contextual_bidirectional,
             dropout=dropout,
         )
 
-        # Classification layer
+        # Attention flow
+        self.attention = AttentionFlow(self.word_embedding_dimension)
+
+        # Modeling layer
+        self.modeling_layer = nn.LSTM(
+            4 * self.word_embedding_dimension,
+            self.word_embedding_dimension,
+            batch_first=True,
+            bidirectional=True,
+            num_layers=2,
+            dropout=dropout,
+        )
+
+        self.out_lstm = nn.LSTM(
+            2 * self.word_embedding_dimension,
+            self.word_embedding_dimension,
+            batch_first=True,
+            bidirectional=True,
+            dropout=dropout,
+        )
+
         self.start_classifier = nn.Linear(
-            self.embedding_dimension * 2, max_context_tokens
+            6 * self.word_embedding_dimension, 1, bias=False
         )
         self.end_classifier = nn.Linear(
-            self.embedding_dimension * 2, max_context_tokens
+            6 * self.word_embedding_dimension, 1, bias=False
         )
+        self.dropout = nn.Dropout(dropout)
 
         # Loss criterion
         self.softmax = nn.LogSoftmax(dim=1)
@@ -246,11 +281,34 @@ class CustomBiDAFModel(nn.Module):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
     def forward(self, **inputs):
-        embedded_questions = self.embedding(inputs["question_ids"].to(self.device))
-        embedded_contexts = self.embedding(inputs["context_ids"].to(self.device))
+        embedded_questions = self.word_embedding(inputs["question_ids"].to(self.device))
+        embedded_contexts = self.word_embedding(inputs["context_ids"].to(self.device))
 
         highway_questions = self.highway(embedded_questions)
         highway_contexts = self.highway(embedded_contexts)
 
-        contextual_questions = self.contextual_embedding(highway_questions)
-        contextual_contexts = self.contextual_embedding(highway_contexts)
+        contextual_questions, _ = self.contextual_embedding(highway_questions)
+        contextual_contexts, _ = self.contextual_embedding(highway_contexts)
+
+        query_aware_contexts = self.attention(contextual_questions, contextual_contexts)
+
+        modeling, _ = self.modeling_layer(query_aware_contexts)
+
+        start_indexes = self.start_classifier(
+            torch.cat([query_aware_contexts, modeling], dim=-1)
+        ).squeeze(-1)
+        start_indexes_probs = self.softmax(self.dropout(start_indexes))
+
+        m2, _ = self.out_lstm(modeling)
+
+        end_indexes = self.end_classifier(torch.cat([query_aware_contexts, m2], dim=-1)).squeeze(-1)
+        end_indexes_probs = self.softmax(self.dropout(end_indexes))
+        
+        start_loss = self.criterion(
+            start_indexes_probs, inputs["answer_start"].to(self.device)
+        )
+        end_loss = self.criterion(
+            end_indexes_probs, inputs["answer_end"].to(self.device)
+        )
+
+        return {"loss": start_loss + end_loss}  # , "outputs": outputs}
