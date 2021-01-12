@@ -8,46 +8,6 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 
 
-def static_padding(sequences, shape, padding):
-    """
-    Given a sequence of tensors with different lenghts and a fixed shape,
-    fit the tensors in a single one by padding to the given shape
-    """
-    out_tensor = torch.empty(*shape, dtype=torch.long).fill_(padding)
-    for i, elem in enumerate(sequences):
-        tensor = torch.tensor(elem)
-        lenght = tensor.size(0)
-        out_tensor[i, :lenght, ...] = tensor
-    return out_tensor
-
-
-def pad_batch(batch, padding_index, max_question_tokens, max_context_tokens):
-    """
-    This function expects to receive a list of tuples (i.e. a batch),
-    s.t. each tuple is made of (question, context, answer_start, answer_end)
-    elements, and returns the same sequences padded with the padding token
-    """
-    (questions, contexts, answers_start, answers_end) = zip(*batch)
-    questions_lenghts = torch.tensor([len(x) for x in questions], dtype=torch.long)
-    contexts_lenghts = torch.tensor([len(y) for y in contexts], dtype=torch.long)
-    padded_questions = static_padding(
-        questions, (len(batch), max_question_tokens), padding_index
-    )
-    padded_contexts = static_padding(
-        contexts, (len(batch), max_context_tokens), padding_index
-    )
-    answers_start_tensor = torch.tensor(answers_start, dtype=torch.long)
-    answers_end_tensor = torch.tensor(answers_end, dtype=torch.long)
-    return (
-        padded_questions,
-        padded_contexts,
-        answers_start_tensor,
-        answers_end_tensor,
-        questions_lenghts,
-        contexts_lenghts,
-    )
-
-
 class SquadDataset:
     """
     SQuAD question answering dataset wrapper
@@ -69,15 +29,11 @@ class SquadDataset:
     def __init__(
         self,
         df_percentage=1.0,
-        question_preprocessor=None,
-        context_preprocessor=None,
         val_split=0.2,
     ):
         # Save instance variables
         self.df_percentage = df_percentage
         self.val_split = val_split
-        self.question_preprocessor = question_preprocessor
-        self.context_preprocessor = context_preprocessor
 
         # Create directories
         self.dataset_folder = os.path.join(os.getcwd(), "data", "training")
@@ -89,9 +45,20 @@ class SquadDataset:
 
         # Prepare the dataset and load the dataframe
         if not os.path.exists(self.dataframe_path):
-            self.dataframe = self._load_dataset()
+            df = self._load_dataset()
         else:
-            self.dataframe = pd.read_pickle(self.dataframe_path)
+            df = pd.read_pickle(self.dataframe_path)
+        
+        # Apply train/val split, store the DataFrame and the
+        # corresponding PyTorch Dataset
+        self.update_df(df)
+
+    def update_df(self, df):
+        """
+        Update the DataFrame and PyTorch Dataset with the given one
+        """
+        # Update the DataFrame
+        self.dataframe = df
 
         # Store a random subset of the entire DataFrame
         if self.df_percentage < 1.0:
@@ -127,9 +94,7 @@ class SquadDataset:
         file = json.loads(open(self.training_set_path).read())
 
         # Flatten JSON
-        js = pd.json_normalize(
-            file, self.JSON_RECORD_PATH, meta=[["data", "title"]]
-        )
+        js = pd.json_normalize(file, self.JSON_RECORD_PATH, meta=[["data", "title"]])
         m = pd.json_normalize(
             file, self.JSON_RECORD_PATH[:-1], meta=[["data", "title"]]
         )
@@ -148,7 +113,7 @@ class SquadDataset:
             sort=False,
         ).reset_index()
         df["context_id"] = df["context"].factorize()[0]
-        
+
         # Rename columns
         df.rename(columns={"data.title": "title", "text": "answer"}, inplace=True)
 
@@ -157,22 +122,10 @@ class SquadDataset:
 
         # Order columns
         df = df[self.COLUMNS]
-        
+
         # Save the dataframe to a pickle file
         df.to_pickle(self.dataframe_path)
-        
-        return df
 
-    def _preprocess(self, df):
-        """
-        Apply the right preprocessing functions to the
-        question/context columns
-        """
-        if self.context_preprocessor is not None:
-            df["context"] = df["context"].apply(self.context_preprocessor)
-            df["text"] = df["text"].apply(self.context_preprocessor)
-        if self.question_preprocessor is not None:
-            df["question"] = df["question"].apply(self.context_preprocessor)
         return df
 
     def _train_val_split(self, df):
