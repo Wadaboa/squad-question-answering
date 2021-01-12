@@ -4,14 +4,25 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 
 
-def get_qa_outputs(start_probs, end_probs, context_offsets):
-    start_indexes = start_probs.argmax(dim=1, keepdims=True)
-    end_indexes = end_probs.argmax(dim=1, keepdims=True)
+def get_qa_outputs(start_probs, end_probs, context_offsets, mask):
+    masked_end = torch.where(mask, end_probs, -1)
+    end_indexes = masked_end.argmax(dim=1, keepdims=True)
+
+    indexes = torch.stack(start_probs.shape[0] * [torch.arange(start_probs.shape[1])])
+    masked_start = torch.where(indexes <= end_indexes, start_probs, -1)
+    start_indexes = masked_start.argmax(dim=1, keepdims=True)
 
     word_start_indexes = torch.gather(context_offsets[:, :, 0], 1, start_indexes)
     word_end_indexes = torch.gather(context_offsets[:, :, 1], 1, end_indexes)
 
     return torch.cat([word_start_indexes, word_end_indexes], dim=1)
+
+
+def precedence_constraint(start_probs, end_probs):
+    num_tokens = start_probs.shape[1]
+    best_start = start_probs.argmax(dim=1, keepdims=True) / num_tokens
+    best_end = start_probs.argmax(dim=1, keepdims=True) / num_tokens
+    return torch.abs(torch.clip(best_end - best_start, 0, num_tokens))
 
 
 class QABaselineModel(nn.Module):
@@ -22,6 +33,8 @@ class QABaselineModel(nn.Module):
         num_recurrent_layers=2,
         bidirectional=False,
         dropout=0.2,
+        alpha_coeff=1.0,
+        beta_coeff=0.0,
     ):
         """
         Build a generic question answering model, with recurrent modules
@@ -53,6 +66,8 @@ class QABaselineModel(nn.Module):
         # Loss criterion
         self.softmax = nn.LogSoftmax(dim=1)
         self.criterion = nn.NLLLoss(ignore_index=-1)
+        self.alpha_coeff = alpha_coeff
+        self.beta_coeff = beta_coeff
 
         # Transfer model to device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -115,10 +130,12 @@ class QABaselineModel(nn.Module):
 
         start_loss = self.criterion(start_probs, inputs["answer_start"].to(self.device))
         end_loss = self.criterion(end_probs, inputs["answer_end"].to(self.device))
+        cst = precedence_constraint(start_probs, end_probs)
+        loss = self.alpha_coeff * (start_loss + end_loss) + self.beta_coeff * cst
 
         outputs = get_qa_outputs(start_probs, end_probs, inputs["context_offsets"])
 
-        return {"loss": start_loss + end_loss, "outputs": outputs}
+        return {"loss": loss, "outputs": outputs}
 
 
 class Highway(nn.Module):
@@ -215,6 +232,8 @@ class BiDAFModel(nn.Module):
         dropout_rate=0.2,
         contextual_recurrent_layers=2,
         contextual_bidirectional=False,
+        alpha_coeff=1.0,
+        beta_coeff=0.0,
     ):
         """
         
@@ -273,6 +292,8 @@ class BiDAFModel(nn.Module):
         # Loss criterion
         self.softmax = nn.LogSoftmax(dim=1)
         self.criterion = nn.NLLLoss(ignore_index=-1)
+        self.alpha_coeff = alpha_coeff
+        self.beta_coeff = beta_coeff
 
         # Transfer model to device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -316,7 +337,9 @@ class BiDAFModel(nn.Module):
 
         start_loss = self.criterion(start_probs, inputs["answer_start"].to(self.device))
         end_loss = self.criterion(end_probs, inputs["answer_end"].to(self.device))
+        cst = precedence_constraint(start_probs, end_probs)
+        loss = self.alpha_coeff * (start_loss + end_loss) + self.beta_coeff * cst
 
         outputs = get_qa_outputs(start_probs, end_probs, inputs["context_offsets"])
 
-        return {"loss": start_loss + end_loss, "outputs": outputs}
+        return {"loss": loss, "outputs": outputs}
