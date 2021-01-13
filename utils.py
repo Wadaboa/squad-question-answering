@@ -1,3 +1,5 @@
+import datetime
+
 from IPython.display import display, HTML
 
 
@@ -8,3 +10,7 @@ def show_df_row(df, index):
     """
     row = df.iloc[index]
     display(HTML(pd.DataFrame([row]).to_html()))
+
+
+def get_run_name():
+    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
