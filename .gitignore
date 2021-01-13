@@ -132,3 +132,6 @@ dmypy.json
 checkpoints/
 runs/
 wandb/
+
+#Vscode
+.vscode/
