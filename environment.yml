@@ -21,4 +21,3 @@ dependencies:
   - pip:
       - black==20.8b1
       - nltk==3.5
-      - tokenizers==0.10.0
