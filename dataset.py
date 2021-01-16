@@ -50,8 +50,7 @@ class SquadDataset:
         # Prepare the dataset and load the dataframe
         self.raw_train_df = self._load_dataset(self.TRAIN_SET_PATH, self.TRAIN_DF_PATH)
         self.raw_test_df = self._load_dataset(self.TEST_SET_PATH, self.TEST_DF_PATH)
-        self.subset = subset
-        if self.subset < 1.0:
+        if subset < 1.0:
             self.raw_train_df = self._get_portion(self.raw_train_df, subset)
 
     def _add_end_index(self, df):
@@ -77,7 +76,8 @@ class SquadDataset:
 
     def _load_dataset(self, dataset_path, dataframe_path):
         """
-        Loads the SQuAD dataset into a Pandas DataFrame, starting from the training set JSON
+        Loads the SQuAD dataset into a Pandas DataFrame, 
+        starting from a specifically-formatted JSON
         """
         if os.path.exists(dataframe_path):
             return pd.read_pickle(dataframe_path)
@@ -112,11 +112,11 @@ class SquadDataset:
         # Add end index for answers and remove duplicated ones
         df = self._add_end_index(df)
         df = self._remove_duplicated_answers(df)
-        
+
         # Order columns and reset index
         df = df[self.COLUMNS]
         df = df.reset_index(drop=True)
-        
+
         # Save the dataframe to a pickle file
         df.to_pickle(dataframe_path)
 
@@ -251,11 +251,17 @@ class SquadTokenizer:
         tokenizer.enable_padding(**tokenizer_padding)
         return outputs
 
-    def find_tokenized_answer_indexes(self, offsets, query, start):
-        assert isinstance(start, bool)
-        index = torch.nonzero(offsets[:, int(start)] == query)
-        assert len(index) in (0, 1)
-        return index.item() if len(index) > 0 else -1
+    def find_tokenized_answer_indexes(self, offsets, starts, ends):
+        batch_size = len(starts)
+        max_answers = max([len(row) for row in starts])
+        indexes = torch.full((batch_size, 2, max_answers), -1)
+        for i, (start, end) in enumerate(zip(starts, ends)):
+            for j, (s, e) in enumerate(zip(start, end)):
+                start_index = torch.nonzero(offsets[i, :, 0] == s)
+                end_index = torch.nonzero(offsets[i, :, 1] == e)
+                if len(start_index) > 0 and len(end_index) > 0:
+                    indexes[i, :, j] = torch.tensor([start_index, end_index])
+        return indexes
 
     def select_tokenizer(self, entity):
         raise NotImplementedError()
@@ -280,7 +286,7 @@ class StandardSquadTokenizer(SquadTokenizer):
         "special_tokens_mask",
         "overflowing",
     ]
-    ENCODING_ATTR_ID = dict(enumerate(ENCODING_ATTR))
+    ENCODING_ATTR_ID = {k: i for i, k in enumerate(ENCODING_ATTR)}
     ATTRGETTER = attrgetter(*ENCODING_ATTR)
 
     def __init__(self, question_tokenizer, context_tokenizer):
@@ -299,38 +305,39 @@ class StandardSquadTokenizer(SquadTokenizer):
     def __call__(self, inputs):
         (questions, contexts, answers_start, answers_end) = zip(*inputs)
         tokenized_questions = self.tokenize(questions, "question", special=True)
-        tokenized_contexts = self.tokenize(questions, "context", special=True)
+        tokenized_contexts = self.tokenize(contexts, "context", special=True)
         qattr = list(zip(*[self.ATTRGETTER(e) for e in tokenized_questions]))
-        qattr = list(zip(*[self.ATTRGETTER(e) for e in tokenized_contexts]))
+        cattr = list(zip(*[self.ATTRGETTER(e) for e in tokenized_contexts]))
 
         # Create the batch dictionary with encoding info
         batch = {
             "question_ids": torch.tensor(qattr[self.ENCODING_ATTR_ID["ids"]]),
             "question_type_ids": torch.tensor(qattr[self.ENCODING_ATTR_ID["type_ids"]]),
             "question_attention_mask": torch.tensor(
-                qattr[self.ENCODING_ATTR_ID["attention_mask"]]
+                qattr[self.ENCODING_ATTR_ID["attention_mask"]], dtype=torch.bool
             ),
             "question_special_tokens_mask": torch.tensor(
-                qattr[self.ENCODING_ATTR_ID["special_tokens_mask"]]
+                qattr[self.ENCODING_ATTR_ID["special_tokens_mask"]], dtype=torch.bool
             ),
             "context_ids": torch.tensor(cattr[self.ENCODING_ATTR_ID["ids"]]),
             "context_type_ids": torch.tensor(cattr[self.ENCODING_ATTR_ID["type_ids"]]),
             "context_attention_mask": torch.tensor(
-                cattr[self.ENCODING_ATTR_ID["attention_mask"]]
+                cattr[self.ENCODING_ATTR_ID["attention_mask"]], dtype=torch.bool
             ),
             "context_special_tokens_mask": torch.tensor(
-                cattr[self.ENCODING_ATTR_ID["special_tokens_mask"]]
+                cattr[self.ENCODING_ATTR_ID["special_tokens_mask"]], dtype=torch.bool
             ),
             "context_offsets": torch.tensor(cattr[self.ENCODING_ATTR_ID["offsets"]]),
         }
 
         # Add custom info to the batch dict
-        masked_offsets = batch["context_offsets"][batch["context_attention_mask"]]
-        batch["answer_start"] = self.find_tokenized_answer_indexes(
-            masked_offsets, answers_start, True
+        masked_offsets = torch.where(
+            batch["context_attention_mask"].unsqueeze(-1).repeat(1, 1, 2),
+            batch["context_offsets"],
+            -1,
         )
-        batch["answer_end"] = self.find_tokenized_answer_indexes(
-            masked_offsets, answers_end, False
+        batch["answers"] = self.find_tokenized_answer_indexes(
+            masked_offsets, answers_start, answers_end
         )
         batch["question_lenghts"] = torch.count_nonzero(
             ~batch["question_special_tokens_mask"]

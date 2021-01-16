@@ -2,6 +2,8 @@ import numpy as np
 import sklearn
 import torch
 import transformers
+from transformers.trainer_pt_utils import nested_detach
+from transformers.trainer_utils import EvalPrediction
 
 
 class SquadTrainer(transformers.Trainer):
@@ -65,15 +67,9 @@ def compute_metrics(eval_prediction):
     Custom function that computes task-specific
     training and evaluation metrics
     """
-    # Labels are stored as a tuple of tensors
-    # (one for answer start and one for answer end)
-    labels = torch.cat(
-        [
-            eval_prediction.label_ids[0].view(-1, 1),
-            eval_prediction.label_ids[1].view(-1, 1),
-        ],
-        dim=1,
-    ).numpy()
+    # Labels are stored as a single tensor
+    # (concatenation of answer start and answer end)
+    labels = eval_prediction.label_ids.numpy()
     preds = eval_prediction.predictions.numpy()
     f_labels, f_preds = labels.flatten(), preds.flatten()
 

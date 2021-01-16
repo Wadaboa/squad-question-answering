@@ -13,4 +13,7 @@ def show_df_row(df, index):
 
 
 def get_run_name():
+    """
+    Return a unique wandb run name
+    """
     return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
