@@ -1,99 +1,111 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 
 
+class MaskedSoftmax(nn.Module):
+    def __init__(self, dim, log=False):
+        super().__init__()
+        self.dim = dim
+        self.log = log
+
+    def forward(self, x, mask=None):
+        """
+        Performs masked softmax
+        """
+        if mask is None:
+            mask = torch.ones_like(x)
+        exp = torch.exp(x) * mask.float()
+        softmax = exp / exp.sum(dim=self.dim).unsqueeze(-1)
+        return softmax if not self.log else torch.log(softmax)
+
+
 class QAOutput(nn.Module):
     def __init__(
-        self,
-        size,
-        dropout_rate=0.2,
-        classifier_bias=True,
-        alpha_coeff=1.0,
-        beta_coeff=0.0,
+        self, input_size, output_size, dropout_rate=0.2, classifier_bias=True,
     ):
         super().__init__()
 
-        self.start_classifier = nn.Linear(size, 1, bias=classifier_bias)
-        self.end_classifier = nn.Linear(size, 1, bias=classifier_bias)
+        self.start_classifier = nn.Linear(input_size, output_size, bias=classifier_bias)
+        self.end_classifier = nn.Linear(input_size, output_size, bias=classifier_bias)
 
         # Dropout module
         self.dropout_rate = dropout_rate
         self.dropout = nn.Dropout(self.dropout_rate)
 
         # Loss criterion
-        self.softmax = nn.LogSoftmax(dim=1)
-        self.criterion = nn.NLLLoss(ignore_index=-1)
-        self.alpha_coeff = alpha_coeff
-        self.beta_coeff = beta_coeff
+        self.softmax = MaskedSoftmax(dim=1, log=True)
+        self.criterion = nn.NLLLoss(reduction="sum", ignore_index=-1)
 
         # Transfer model to device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.to(self.device)
 
-    def get_qa_outputs(self, start_probs, end_probs, context_offsets, mask):
-        masked_end = torch.where(mask, end_probs, torch.tensor(-1, dtype=torch.float32))
-        end_indexes = masked_end.argmax(dim=1, keepdims=True)
-
+    def get_qa_outputs(self, start_probs, end_probs, context_offsets):
+        end_indexes = end_probs.argmax(dim=1, keepdims=True)
         indexes = torch.stack(
             start_probs.shape[0] * [torch.arange(start_probs.shape[1])]
         )
-        masked_start = torch.where(indexes <= end_indexes, start_probs, torch.tensor(-1, dtype=torch.float32))
+        masked_start = torch.where(
+            indexes <= end_indexes,
+            start_probs,
+            torch.tensor(-np.inf, dtype=torch.float32),
+        )
         start_indexes = masked_start.argmax(dim=1, keepdims=True)
 
         return torch.cat([start_indexes, end_indexes], dim=1)
 
     def from_token_to_char(self, context_offsets, output_indexes):
         word_start_indexes = torch.gather(
-            context_offsets[:, :, 0], 1, output_indexes[:, 0]
+            context_offsets[:, :, 0], 1, output_indexes[:, 0].unsqueeze(-1)
         )
         word_end_indexes = torch.gather(
-            context_offsets[:, :, 1], 1, output_indexes[:, 1]
+            context_offsets[:, :, 1], 1, output_indexes[:, 1].unsqueeze(-1)
         )
         return torch.cat([word_start_indexes, word_end_indexes], dim=1)
 
     def get_nearest_answers(self, outputs, answers):
         distances = torch.where(
             answers != -1,
-            torch.abs(outputs.unsqueeze(-1).repeat(1, 1, answers.shape[-1]) - answers),
+            torch.abs(outputs.unsqueeze(1).repeat(1, answers.shape[1], 1) - answers),
             -1,
         )
-        summed_distances = torch.sum(distances, dim=1, keepdims=True)
-        min_indexes = torch.min(summed_distances, dim=0, keepdims=True)
-        return answers[min_indexes]
-
-    def precedence_constraint(self, start_probs, end_probs):
-        num_tokens = start_probs.shape[1]
-        best_start = start_probs.argmax(dim=1, keepdims=True) / num_tokens
-        best_end = start_probs.argmax(dim=1, keepdims=True) / num_tokens
-        return torch.abs(torch.clip(best_end - best_start, 0, num_tokens))
+        summed_distances = torch.sum(distances, dim=2, keepdims=True)
+        summed_distances[summed_distances < 0] = torch.max(summed_distances) + 1
+        min_values, min_indexes = torch.min(summed_distances, dim=1, keepdims=True)
+        mask = (summed_distances == min_values).repeat(1, 1, 2)
+        return answers[mask].reshape(outputs.shape)
 
     def forward(self, start_input, end_input, **inputs):
-        start_indexes = self.start_classifier(start_input).squeeze(-1)
-        start_probs = self.softmax(self.dropout(start_indexes))
-
         end_indexes = self.end_classifier(end_input).squeeze(-1)
-        end_probs = self.softmax(self.dropout(end_indexes))
-
-        outputs = self.get_qa_outputs(
-            start_probs,
-            end_probs,
-            inputs["context_offsets"],
-            inputs["context_attention_mask"],
+        end_probs = self.softmax(
+            self.dropout(end_indexes), inputs["context_attention_mask"]
         )
+        end_best_indexes = end_probs.argmax(dim=1, keepdims=True)
+
+        indexes = torch.stack(end_probs.shape[0] * [torch.arange(end_probs.shape[1])])
+        masked_start = indexes <= end_best_indexes
+        start_indexes = self.start_classifier(start_input).squeeze(-1)
+        start_probs = self.softmax(self.dropout(start_indexes), masked_start)
+
+        outputs = self.get_qa_outputs(start_probs, end_probs, inputs["context_offsets"])
         answers = self.get_nearest_answers(outputs, inputs["answers"])
+        
+        num_starts = torch.count_nonzero(masked_start, dim=1)
+        num_ends = torch.count_nonzero(inputs["context_attention_mask"], dim=1)
+        start_probs[start_probs == -np.inf] = 0.0
+        end_probs[end_probs == -np.inf] = 0.0
+        print(start_probs, end_probs)
+        
+        start_loss = self.criterion(start_probs, answers[:, 0]) / num_starts
+        end_loss = self.criterion(end_probs, answers[:, 1]) / num_ends
+        loss = torch.sum(start_loss + end_loss)
+        print(start_loss, end_loss, loss)
 
-        start_loss = self.criterion(start_probs, answers[:, 0])
-        end_loss = self.criterion(end_probs, answers[:, 1])
-        cst = self.precedence_constraint(start_probs, end_probs)
-        loss = self.alpha_coeff * (start_loss + end_loss) + self.beta_coeff * cst
-
-        word_outputs = self.from_token_to_char(
-            inputs["context_offsets"], outputs[:, 0], outputs[:, 1]
-        )
-
-        return {"loss": loss, "outputs": outputs}
+        word_outputs = self.from_token_to_char(inputs["context_offsets"], outputs)
+        return {"loss": loss, "outputs": word_outputs}
 
 
 class QABaselineModel(nn.Module):
@@ -104,8 +116,6 @@ class QABaselineModel(nn.Module):
         num_recurrent_layers=2,
         bidirectional=False,
         dropout_rate=0.2,
-        alpha_coeff=1.0,
-        beta_coeff=0.0,
     ):
         """
         Build a generic question answering model, with recurrent modules
@@ -125,28 +135,14 @@ class QABaselineModel(nn.Module):
             bidirectional=bidirectional,
             dropout=dropout_rate,
         )
-        
+
+        # Output layer
         self.output_layer = QAOutput(
             self.embedding_dimension * 2,
+            max_context_tokens,
             dropout_rate=dropout_rate,
             classifier_bias=True,
-            alpha_coeff=alpha_coeff,
-            beta_coeff=beta_coeff,
         )
-        
-        # Classification layer
-        self.start_classifier = nn.Linear(
-            self.embedding_dimension * 2, max_context_tokens
-        )
-        self.end_classifier = nn.Linear(
-            self.embedding_dimension * 2, max_context_tokens
-        )
-
-        # Loss criterion
-        self.softmax = nn.LogSoftmax(dim=1)
-        self.criterion = nn.NLLLoss(ignore_index=-1)
-        self.alpha_coeff = alpha_coeff
-        self.beta_coeff = beta_coeff
 
         # Transfer model to device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -204,21 +200,8 @@ class QABaselineModel(nn.Module):
             inputs["context_lenghts"].to(self.device),
         )
         merged_inputs = self._merge_embeddings(sentence_questions, sentence_contexts)
-        
-        
-        
-        
-        start_probs = self.softmax(self.start_classifier(merged_inputs))
-        end_probs = self.softmax(self.end_classifier(merged_inputs))
 
-        start_loss = self.criterion(start_probs, inputs["answer_start"].to(self.device))
-        end_loss = self.criterion(end_probs, inputs["answer_end"].to(self.device))
-        cst = precedence_constraint(start_probs, end_probs)
-        loss = self.alpha_coeff * (start_loss + end_loss) + self.beta_coeff * cst
-
-        outputs = get_qa_outputs(start_probs, end_probs, inputs["context_offsets"])
-
-        return {"loss": loss, "outputs": outputs}
+        return self.output_layer(merged_inputs, merged_inputs, **inputs)
 
 
 class Highway(nn.Module):
@@ -315,11 +298,9 @@ class BiDAFModel(nn.Module):
         dropout_rate=0.2,
         contextual_recurrent_layers=2,
         contextual_bidirectional=False,
-        alpha_coeff=1.0,
-        beta_coeff=0.0,
     ):
         """
-        
+
         """
         super().__init__()
 
@@ -367,10 +348,9 @@ class BiDAFModel(nn.Module):
         )
         self.output_layer = QAOutput(
             6 * self.word_embedding_dimension,
+            1,
             dropout_rate=self.dropout_rate,
             classifier_bias=False,
-            alpha_coeff=alpha_coeff,
-            beta_coeff=beta_coeff,
         )
 
         # Transfer model to device
@@ -389,7 +369,7 @@ class BiDAFModel(nn.Module):
 
         highway_questions = self.highway(embedded_questions)
         highway_contexts = self.highway(embedded_contexts)
-        
+
         contextual_questions = self.dropout(
             self.contextual_embedding(highway_questions)[0]
         )

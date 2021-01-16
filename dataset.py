@@ -254,13 +254,13 @@ class SquadTokenizer:
     def find_tokenized_answer_indexes(self, offsets, starts, ends):
         batch_size = len(starts)
         max_answers = max([len(row) for row in starts])
-        indexes = torch.full((batch_size, 2, max_answers), -1)
+        indexes = torch.full((batch_size, max_answers, 2), -1)
         for i, (start, end) in enumerate(zip(starts, ends)):
             for j, (s, e) in enumerate(zip(start, end)):
                 start_index = torch.nonzero(offsets[i, :, 0] == s)
                 end_index = torch.nonzero(offsets[i, :, 1] == e)
                 if len(start_index) > 0 and len(end_index) > 0:
-                    indexes[i, :, j] = torch.tensor([start_index, end_index])
+                    indexes[i, j, :] = torch.tensor([start_index, end_index])
         return indexes
 
     def select_tokenizer(self, entity):
@@ -340,10 +340,10 @@ class StandardSquadTokenizer(SquadTokenizer):
             masked_offsets, answers_start, answers_end
         )
         batch["question_lenghts"] = torch.count_nonzero(
-            ~batch["question_special_tokens_mask"]
+            batch["question_attention_mask"], dim=1
         )
         batch["context_lenghts"] = torch.count_nonzero(
-            ~batch["context_special_tokens_mask"]
+            batch["context_attention_mask"], dim=1
         )
 
         return batch
