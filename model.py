@@ -1,10 +1,12 @@
 import numpy as np
+import transformers
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 
 import utils
+
 
 class MaskedSoftmax(nn.Module):
     def __init__(self, dim, log=False, eps=1e-4):
@@ -19,7 +21,9 @@ class MaskedSoftmax(nn.Module):
         """
         if mask is None:
             mask = torch.ones_like(x)
-        exp = torch.exp(x) * torch.where(mask, mask.float(), torch.tensor(self.eps, dtype=torch.float32))
+        exp = torch.exp(x) * torch.where(
+            mask, mask.float(), torch.tensor(self.eps, dtype=torch.float32)
+        )
         softmax = exp / exp.sum(dim=self.dim).unsqueeze(-1)
         return softmax if not self.log else torch.log(softmax)
 
@@ -45,7 +49,7 @@ class QAOutput(nn.Module):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.to(self.device)
 
-    def get_qa_outputs(self, start_probs, end_probs, context_offsets):
+    def get_qa_outputs(self, start_probs, end_probs):
         end_indexes = end_probs.argmax(dim=1, keepdims=True)
         indexes = torch.stack(
             start_probs.shape[0] * [torch.arange(start_probs.shape[1])]
@@ -68,25 +72,28 @@ class QAOutput(nn.Module):
         )
         return torch.cat([word_start_indexes, word_end_indexes], dim=1)
 
-
     def forward(self, start_input, end_input, **inputs):
         end_indexes = self.end_classifier(end_input).squeeze(-1)
-        end_probs = self.softmax(
-            self.dropout(end_indexes), inputs["context_attention_mask"]
-        )
-        
+        masked_end = inputs["subword_end_mask"] & inputs["context_attention_mask"]
+        end_probs = self.softmax(self.dropout(end_indexes), masked_end)
+
         ########### inputs["context_attention_mask"] to start_probs or masked_start?
         end_best_indexes = end_probs.argmax(dim=1, keepdims=True)
         indexes = torch.stack(end_probs.shape[0] * [torch.arange(end_probs.shape[1])])
-        masked_start = indexes <= end_best_indexes
+        masked_start = (
+            (indexes <= end_best_indexes)
+            & inputs["context_attention_mask"]
+            & inputs["subword_start_mask"]
+        )
         ############
-        
+
         start_indexes = self.start_classifier(start_input).squeeze(-1)
         start_probs = self.softmax(
-            self.dropout(start_indexes), masked_start # inputs["context_attention_mask"] ???
+            self.dropout(start_indexes),
+            masked_start,  # inputs["context_attention_mask"] ???
         )
 
-        outputs = self.get_qa_outputs(start_probs, end_probs, inputs["context_offsets"])
+        outputs = self.get_qa_outputs(start_probs, end_probs)
         answers = utils.get_nearest_answers(inputs["answers"], outputs)
 
         start_loss = self.criterion(start_probs, answers[:, 0])
@@ -94,7 +101,14 @@ class QAOutput(nn.Module):
         loss = start_loss + end_loss
 
         word_outputs = self.from_token_to_char(inputs["context_offsets"], outputs)
-        return {"loss": loss, "outputs": word_outputs}
+        token_outputs = dict()
+        for i, question_id in enumerate(inputs["question_hash_ids"]):
+            s, e = outputs[i][0], outputs[i][1]
+            token_outputs[question_id] = inputs["context_ids"][i][s : e + 1]
+        
+        print(token_outputs)
+
+        return {"loss": loss, "outputs": word_outputs, "token_outputs": token_outputs}
 
 
 class QABaselineModel(nn.Module):
@@ -376,3 +390,22 @@ class BiDAFModel(nn.Module):
             torch.cat([query_aware_contexts, m2], dim=-1),
             **inputs,
         )
+
+
+class QABertModel(nn.Module):
+    def __init__(self, dropout_rate=0.2):
+        super().__init__()
+        self.bert_model = transformers.BertModel.from_pretrained("bert-base-uncased")
+        self.output_layer = QAOutput(
+            768, 1, dropout_rate=dropout_rate, classifier_bias=True,
+        )
+
+    def forward(self, **inputs):
+        bert_inputs = {
+            "input_ids": inputs["context_ids"],
+            "token_type_ids": inputs["context_type_ids"],
+            "attention_mask": inputs["attention_mask"],
+        }
+        bert_outputs = self.bert_model(**bert_inputs)[0]
+        outputs = self.output_layer(bert_outputs, bert_outputs, **inputs)
+        return outputs

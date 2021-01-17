@@ -9,6 +9,7 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
 from tokenizers import Tokenizer
+from tokenizers.implementations import BaseTokenizer
 
 
 class SquadDataset:
@@ -242,7 +243,20 @@ class SquadTokenizer:
     for the SQuAD dataset
     """
 
-    def tokenize(self, inputs, entity, special=False):
+    ENCODING_ATTR = [
+        "ids",
+        "type_ids",
+        "tokens",
+        "offsets",
+        "attention_mask",
+        "special_tokens_mask",
+        "overflowing",
+        "word_ids",
+    ]
+    ENCODING_ATTR_ID = {k: i for i, k in enumerate(ENCODING_ATTR)}
+    ATTRGETTER = attrgetter(*ENCODING_ATTR)
+
+    def tokenize(self, inputs, entity=None, special=False):
         tokenizer = self.select_tokenizer(entity)
         tokenizer_padding = tokenizer.padding
         if not special:
@@ -260,10 +274,32 @@ class SquadTokenizer:
                 start_index = torch.nonzero(offsets[i, :, 0] == s)
                 end_index = torch.nonzero(offsets[i, :, 1] == e)
                 if len(start_index) > 0 and len(end_index) > 0:
+                    print(start_index, end_index)
                     indexes[i, j, :] = torch.tensor([start_index, end_index])
         return indexes
 
-    def select_tokenizer(self, entity):
+    def find_subword_indexes(self, word_ids, start_id=1, fill_id=0, end_id=2):
+        start_mask = torch.full((len(word_ids), len(word_ids[0])), False)
+        end_mask = torch.full_like(start_mask, False)
+
+        for i, word_id in enumerate(word_ids):
+
+            if word_id[0] != None:
+                start_mask[i, 0] = True
+
+            for j in range(1, len(word_id)):
+                if word_id[j] != word_id[j - 1]:
+                    if word_id[j] != None:
+                        start_mask[i, j] = True
+                    if word_id[j - 1] != None:
+                        end_mask[i, j] = True
+
+            if word_id[-1] != None:
+                end_mask[i, -1] = True
+
+        return start_mask, end_mask
+
+    def select_tokenizer(self, entity=None):
         raise NotImplementedError()
 
     def __call__(self, inputs):
@@ -277,18 +313,6 @@ class StandardSquadTokenizer(SquadTokenizer):
     (one for questions and one for contexts)
     """
 
-    ENCODING_ATTR = [
-        "ids",
-        "type_ids",
-        "tokens",
-        "offsets",
-        "attention_mask",
-        "special_tokens_mask",
-        "overflowing",
-    ]
-    ENCODING_ATTR_ID = {k: i for i, k in enumerate(ENCODING_ATTR)}
-    ATTRGETTER = attrgetter(*ENCODING_ATTR)
-
     def __init__(self, question_tokenizer, context_tokenizer):
         super().__init__()
         assert isinstance(question_tokenizer, Tokenizer)
@@ -296,14 +320,14 @@ class StandardSquadTokenizer(SquadTokenizer):
         self.question_tokenizer = question_tokenizer
         self.context_tokenizer = context_tokenizer
 
-    def select_tokenizer(self, entity):
+    def select_tokenizer(self, entity=None):
         assert entity in ("question", "context")
         return (
             self.context_tokenizer if entity == "context" else self.question_tokenizer
         )
 
     def __call__(self, inputs):
-        (questions, contexts, answers_start, answers_end) = zip(*inputs)
+        (question_ids, questions, contexts, answers_start, answers_end) = zip(*inputs)
         tokenized_questions = self.tokenize(questions, "question", special=True)
         tokenized_contexts = self.tokenize(contexts, "context", special=True)
         qattr = list(zip(*[self.ATTRGETTER(e) for e in tokenized_questions]))
@@ -328,6 +352,7 @@ class StandardSquadTokenizer(SquadTokenizer):
                 cattr[self.ENCODING_ATTR_ID["special_tokens_mask"]], dtype=torch.bool
             ),
             "context_offsets": torch.tensor(cattr[self.ENCODING_ATTR_ID["offsets"]]),
+            "question_hash_ids": question_ids,
         }
 
         # Add custom info to the batch dict
@@ -345,6 +370,10 @@ class StandardSquadTokenizer(SquadTokenizer):
         batch["context_lenghts"] = torch.count_nonzero(
             batch["context_attention_mask"], dim=1
         )
+        (
+            batch["subword_start_mask"],
+            batch["subword_end_mask"],
+        ) = self.find_subword_indexes(cattr[self.ENCODING_ATTR_ID["word_ids"]])
 
         return batch
 
@@ -355,13 +384,51 @@ class BertSquadTokenizer(SquadTokenizer):
     a BERT model
     """
 
-    def __init__(tokenizer):
+    def __init__(self, tokenizer):
         super().__init__()
-        assert isinstance(tokenizer, Tokenizer)
+        assert isinstance(tokenizer, Tokenizer) or isinstance(tokenizer, BaseTokenizer)
         self.tokenizer = tokenizer
 
-    def select_tokenizer(self, entity):
+    def select_tokenizer(self, entity=None):
         return self.tokenizer
+
+    def __call__(self, inputs):
+        (question_ids, questions, contexts, answers_start, answers_end) = zip(*inputs)
+        tokenized = self.tokenize(list(zip(questions, contexts)), special=True)
+        attr = list(zip(*[self.ATTRGETTER(e) for e in tokenized]))
+
+        # Create the batch dictionary with encoding info
+        batch = {
+            "context_ids": torch.tensor(attr[self.ENCODING_ATTR_ID["ids"]]),
+            "context_type_ids": torch.tensor(attr[self.ENCODING_ATTR_ID["type_ids"]]),
+            "attention_mask": torch.tensor(
+                attr[self.ENCODING_ATTR_ID["attention_mask"]], dtype=torch.bool
+            ),
+            "special_tokens_mask": torch.tensor(
+                attr[self.ENCODING_ATTR_ID["special_tokens_mask"]], dtype=torch.bool
+            ),
+            "offsets": torch.tensor(attr[self.ENCODING_ATTR_ID["offsets"]]),
+            "question_hash_ids": question_ids,
+        }
+
+        # Add custom info to the batch dict
+        batch["context_attention_mask"] = (
+            batch["context_type_ids"].bool() & ~batch["special_tokens_mask"]
+        )
+        batch["context_offsets"] = torch.where(
+            batch["context_attention_mask"].unsqueeze(-1).repeat(1, 1, 2),
+            batch["offsets"],
+            -1,
+        )
+        batch["answers"] = self.find_tokenized_answer_indexes(
+            batch["context_offsets"], answers_start, answers_end
+        )
+        (
+            batch["subword_start_mask"],
+            batch["subword_end_mask"],
+        ) = self.find_subword_indexes(attr[self.ENCODING_ATTR_ID["word_ids"]])
+
+        return batch
 
 
 class SquadTorchDataset(Dataset):
@@ -378,8 +445,9 @@ class SquadTorchDataset(Dataset):
 
     def __getitem__(self, index):
         assert isinstance(index, int)
+        question_id = self.df.loc[index, "question_id"]
         question = self.df.loc[index, "question"]
         context = self.df.loc[index, "context"]
         answer_start = self.df.loc[index, "answer_start"]
         answer_end = self.df.loc[index, "answer_end"]
-        return question, context, answer_start, answer_end
+        return question_id, question, context, answer_start, answer_end
