@@ -1,9 +1,21 @@
 import datetime
 
-import gensim
+import torch
 import gensim.downloader as gloader
 from IPython.display import display, HTML
 
+
+def get_nearest_answers(labels, preds):
+    distances = torch.where(
+        labels != -1,
+        torch.abs(preds.unsqueeze(1).repeat(1, labels.shape[1], 1) - labels),
+        -1,
+    )
+    summed_distances = torch.sum(distances, dim=2, keepdims=True)
+    summed_distances[summed_distances < 0] = torch.max(summed_distances) + 1
+    min_values, _ = torch.min(summed_distances, dim=1, keepdims=True)
+    mask = (summed_distances == min_values).repeat(1, 1, 2)
+    return labels[mask].reshape(preds.shape)
 
 def show_df_row(df, index):
     """

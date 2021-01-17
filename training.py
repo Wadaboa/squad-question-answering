@@ -1,9 +1,10 @@
 import numpy as np
 import sklearn
-import torch
 import transformers
 from transformers.trainer_pt_utils import nested_detach
 from transformers.trainer_utils import EvalPrediction
+
+import utils
 
 
 class SquadTrainer(transformers.Trainer):
@@ -49,8 +50,8 @@ class SquadTrainer(transformers.Trainer):
             self._past = outputs[self.args.past_index]
         # We don't use .loss here since the model may return tuples instead of ModelOutput.
         return outputs["loss"] if isinstance(outputs, dict) else outputs[0]
-
-
+    
+    
 def exact_match(labels, preds):
     """
     Compute the EM score of the SQuAD competition,
@@ -69,8 +70,11 @@ def compute_metrics(eval_prediction):
     """
     # Labels are stored as a single tensor
     # (concatenation of answer start and answer end)
-    labels = eval_prediction.label_ids.numpy()
-    preds = eval_prediction.predictions.numpy()
+    labels = eval_prediction.label_ids
+    preds = eval_prediction.predictions
+    labels = utils.get_nearest_answers(labels, preds)
+    
+    labels, preds = labels.numpy(), preds.numpy()
     f_labels, f_preds = labels.flatten(), preds.flatten()
 
     # Return a dictionary of metrics, as required by the Trainer

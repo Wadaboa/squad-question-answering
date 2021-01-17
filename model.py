@@ -4,12 +4,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 
+import utils
 
 class MaskedSoftmax(nn.Module):
-    def __init__(self, dim, log=False):
+    def __init__(self, dim, log=False, eps=1e-4):
         super().__init__()
         self.dim = dim
         self.log = log
+        self.eps = eps
 
     def forward(self, x, mask=None):
         """
@@ -17,7 +19,7 @@ class MaskedSoftmax(nn.Module):
         """
         if mask is None:
             mask = torch.ones_like(x)
-        exp = torch.exp(x) * mask.float()
+        exp = torch.exp(x) * torch.where(mask, mask.float(), torch.tensor(self.eps, dtype=torch.float32))
         softmax = exp / exp.sum(dim=self.dim).unsqueeze(-1)
         return softmax if not self.log else torch.log(softmax)
 
@@ -37,7 +39,7 @@ class QAOutput(nn.Module):
 
         # Loss criterion
         self.softmax = MaskedSoftmax(dim=1, log=True)
-        self.criterion = nn.NLLLoss(reduction="sum", ignore_index=-1)
+        self.criterion = nn.NLLLoss(reduction="mean", ignore_index=-1)
 
         # Transfer model to device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -66,43 +68,30 @@ class QAOutput(nn.Module):
         )
         return torch.cat([word_start_indexes, word_end_indexes], dim=1)
 
-    def get_nearest_answers(self, outputs, answers):
-        distances = torch.where(
-            answers != -1,
-            torch.abs(outputs.unsqueeze(1).repeat(1, answers.shape[1], 1) - answers),
-            -1,
-        )
-        summed_distances = torch.sum(distances, dim=2, keepdims=True)
-        summed_distances[summed_distances < 0] = torch.max(summed_distances) + 1
-        min_values, min_indexes = torch.min(summed_distances, dim=1, keepdims=True)
-        mask = (summed_distances == min_values).repeat(1, 1, 2)
-        return answers[mask].reshape(outputs.shape)
 
     def forward(self, start_input, end_input, **inputs):
         end_indexes = self.end_classifier(end_input).squeeze(-1)
         end_probs = self.softmax(
             self.dropout(end_indexes), inputs["context_attention_mask"]
         )
+        
+        ########### inputs["context_attention_mask"] to start_probs or masked_start?
         end_best_indexes = end_probs.argmax(dim=1, keepdims=True)
-
         indexes = torch.stack(end_probs.shape[0] * [torch.arange(end_probs.shape[1])])
         masked_start = indexes <= end_best_indexes
+        ############
+        
         start_indexes = self.start_classifier(start_input).squeeze(-1)
-        start_probs = self.softmax(self.dropout(start_indexes), masked_start)
+        start_probs = self.softmax(
+            self.dropout(start_indexes), masked_start # inputs["context_attention_mask"] ???
+        )
 
         outputs = self.get_qa_outputs(start_probs, end_probs, inputs["context_offsets"])
-        answers = self.get_nearest_answers(outputs, inputs["answers"])
-        
-        num_starts = torch.count_nonzero(masked_start, dim=1)
-        num_ends = torch.count_nonzero(inputs["context_attention_mask"], dim=1)
-        start_probs[start_probs == -np.inf] = 0.0
-        end_probs[end_probs == -np.inf] = 0.0
-        print(start_probs, end_probs)
-        
-        start_loss = self.criterion(start_probs, answers[:, 0]) / num_starts
-        end_loss = self.criterion(end_probs, answers[:, 1]) / num_ends
-        loss = torch.sum(start_loss + end_loss)
-        print(start_loss, end_loss, loss)
+        answers = utils.get_nearest_answers(inputs["answers"], outputs)
+
+        start_loss = self.criterion(start_probs, answers[:, 0])
+        end_loss = self.criterion(end_probs, answers[:, 1])
+        loss = start_loss + end_loss
 
         word_outputs = self.from_token_to_char(inputs["context_offsets"], outputs)
         return {"loss": loss, "outputs": word_outputs}
