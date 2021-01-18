@@ -1,3 +1,5 @@
+from collections import OrderedDict
+
 import numpy as np
 import transformers
 import torch
@@ -9,20 +11,23 @@ import utils
 
 
 class MaskedSoftmax(nn.Module):
-    def __init__(self, dim, log=False, eps=1e-4):
+    def __init__(self, dim, log=False, eps=1e-4, device="cpu"):
         super().__init__()
         self.dim = dim
         self.log = log
         self.eps = eps
+        self.device = device
 
     def forward(self, x, mask=None):
         """
         Performs masked softmax
         """
         if mask is None:
-            mask = torch.ones_like(x)
+            mask = torch.ones_like(x, device=self.device)
         exp = torch.exp(x) * torch.where(
-            mask, mask.float(), torch.tensor(self.eps, dtype=torch.float32)
+            mask,
+            mask.float(),
+            torch.tensor(self.eps, dtype=torch.float32, device=self.device),
         )
         softmax = exp / exp.sum(dim=self.dim).unsqueeze(-1)
         return softmax if not self.log else torch.log(softmax)
@@ -30,7 +35,12 @@ class MaskedSoftmax(nn.Module):
 
 class QAOutput(nn.Module):
     def __init__(
-        self, input_size, output_size, dropout_rate=0.2, classifier_bias=True,
+        self,
+        input_size,
+        output_size,
+        dropout_rate=0.2,
+        classifier_bias=True,
+        device="cpu",
     ):
         super().__init__()
 
@@ -42,11 +52,11 @@ class QAOutput(nn.Module):
         self.dropout = nn.Dropout(self.dropout_rate)
 
         # Loss criterion
-        self.softmax = MaskedSoftmax(dim=1, log=True)
+        self.softmax = MaskedSoftmax(dim=1, log=True, device=device)
         self.criterion = nn.NLLLoss(reduction="mean", ignore_index=-1)
 
         # Transfer model to device
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = device
         self.to(self.device)
 
     def get_qa_outputs(self, start_probs, end_probs):
@@ -57,7 +67,7 @@ class QAOutput(nn.Module):
         masked_start = torch.where(
             indexes <= end_indexes,
             start_probs,
-            torch.tensor(-np.inf, dtype=torch.float32),
+            torch.tensor(-np.inf, dtype=torch.float32, device=self.device),
         )
         start_indexes = masked_start.argmax(dim=1, keepdims=True)
 
@@ -94,21 +104,23 @@ class QAOutput(nn.Module):
         )
 
         outputs = self.get_qa_outputs(start_probs, end_probs)
-        answers = utils.get_nearest_answers(inputs["answers"], outputs)
+        answers = utils.get_nearest_answers(
+            inputs["answers"], outputs, device=self.device
+        )
 
         start_loss = self.criterion(start_probs, answers[:, 0])
         end_loss = self.criterion(end_probs, answers[:, 1])
         loss = start_loss + end_loss
 
         word_outputs = self.from_token_to_char(inputs["context_offsets"], outputs)
-        token_outputs = dict()
-        for i, question_id in enumerate(inputs["question_hash_ids"]):
-            s, e = outputs[i][0], outputs[i][1]
-            token_outputs[question_id] = inputs["context_ids"][i][s : e + 1]
-        
-        print(token_outputs)
-
-        return {"loss": loss, "outputs": word_outputs, "token_outputs": token_outputs}
+        return OrderedDict(
+            {
+                "loss": loss,
+                "token_outputs": outputs,
+                "word_outputs": word_outputs,
+                "indexes": inputs["indexes"],
+            }
+        )
 
 
 class QABaselineModel(nn.Module):
@@ -119,6 +131,7 @@ class QABaselineModel(nn.Module):
         num_recurrent_layers=2,
         bidirectional=False,
         dropout_rate=0.2,
+        device="cpu",
     ):
         """
         Build a generic question answering model, with recurrent modules
@@ -145,10 +158,11 @@ class QABaselineModel(nn.Module):
             max_context_tokens,
             dropout_rate=dropout_rate,
             classifier_bias=True,
+            device=device,
         )
 
         # Transfer model to device
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = device
         self.to(self.device)
 
     def count_parameters(self):
@@ -194,13 +208,13 @@ class QABaselineModel(nn.Module):
         Perform a forward pass and return predictions over
         a mini-batch of sequences of the same lenght
         """
-        embedded_questions = self.embedding(inputs["question_ids"].to(self.device))
-        embedded_contexts = self.embedding(inputs["context_ids"].to(self.device))
+        embedded_questions = self.embedding(inputs["question_ids"])
+        embedded_contexts = self.embedding(inputs["context_ids"])
         sentence_questions, sentence_contexts = self._sentence_embedding(
             embedded_questions,
             embedded_contexts,
-            inputs["question_lenghts"].to(self.device),
-            inputs["context_lenghts"].to(self.device),
+            inputs["question_lenghts"],
+            inputs["context_lenghts"],
         )
         merged_inputs = self._merge_embeddings(sentence_questions, sentence_contexts)
 
@@ -208,10 +222,15 @@ class QABaselineModel(nn.Module):
 
 
 class Highway(nn.Module):
-    def __init__(self, size, nonlinearity=nn.ReLU, gate_activation=nn.Sigmoid):
+    def __init__(
+        self, size, nonlinearity=nn.ReLU, gate_activation=nn.Sigmoid, device="cpu"
+    ):
         super().__init__()
         self.linear = nn.Sequential(nn.Linear(size, size), nonlinearity())
         self.gate = nn.Sequential(nn.Linear(size, size), gate_activation())
+
+        self.device = device
+        self.to(self.device)
 
     def forward(self, x):
         h = self.linear(x)
@@ -219,21 +238,31 @@ class Highway(nn.Module):
         return g * h + (1 - g) * x
 
 
-def get_highway(num_layers, size, nonlinearity=nn.ReLU, gate_activation=nn.Sigmoid):
+def get_highway(
+    num_layers, size, nonlinearity=nn.ReLU, gate_activation=nn.Sigmoid, device="cpu"
+):
     highway = []
     for _ in range(num_layers):
         highway.append(
-            Highway(size, nonlinearity=nonlinearity, gate_activation=gate_activation)
+            Highway(
+                size,
+                nonlinearity=nonlinearity,
+                gate_activation=gate_activation,
+                device=device,
+            )
         )
     return nn.Sequential(*highway)
 
 
 class AttentionFlow(nn.Module):
-    def __init__(self, size):
+    def __init__(self, size, device="cpu"):
         super().__init__()
         self.size = size
         self.similarity = nn.Linear(3 * size, 1, bias=False)
         self.query_aware_context = nn.Linear(4 * size, 4 * size)
+
+        self.device = device
+        self.to(self.device)
 
     def get_similarity_input(self, questions, contexts):
         questions_shape = questions.shape
@@ -293,7 +322,7 @@ class AttentionFlow(nn.Module):
         return g
 
 
-class BiDAFModel(nn.Module):
+class QABiDAFModel(nn.Module):
     def __init__(
         self,
         embedding_module,
@@ -301,6 +330,7 @@ class BiDAFModel(nn.Module):
         dropout_rate=0.2,
         contextual_recurrent_layers=2,
         contextual_bidirectional=False,
+        device="cpu",
     ):
         """
 
@@ -313,7 +343,9 @@ class BiDAFModel(nn.Module):
 
         # Highway network
         self.highway_depth = highway_depth
-        self.highway = get_highway(self.highway_depth, self.word_embedding_dimension)
+        self.highway = get_highway(
+            self.highway_depth, self.word_embedding_dimension, device=device
+        )
 
         # Dropout module
         self.dropout_rate = dropout_rate
@@ -330,7 +362,7 @@ class BiDAFModel(nn.Module):
         )
 
         # Attention flow
-        self.attention = AttentionFlow(self.word_embedding_dimension)
+        self.attention = AttentionFlow(self.word_embedding_dimension, device=device)
 
         # Modeling layer
         self.modeling_layer = nn.LSTM(
@@ -354,10 +386,11 @@ class BiDAFModel(nn.Module):
             1,
             dropout_rate=self.dropout_rate,
             classifier_bias=False,
+            device=device,
         )
 
         # Transfer model to device
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = device
         self.to(self.device)
 
     def count_parameters(self):
@@ -393,12 +426,15 @@ class BiDAFModel(nn.Module):
 
 
 class QABertModel(nn.Module):
-    def __init__(self, dropout_rate=0.2):
+    def __init__(self, dropout_rate=0.2, device="cpu"):
         super().__init__()
         self.bert_model = transformers.BertModel.from_pretrained("bert-base-uncased")
         self.output_layer = QAOutput(
-            768, 1, dropout_rate=dropout_rate, classifier_bias=True,
+            768, 1, dropout_rate=dropout_rate, classifier_bias=True, device=device
         )
+
+        self.device = device
+        self.to(self.device)
 
     def forward(self, **inputs):
         bert_inputs = {

@@ -53,6 +53,7 @@ class SquadDataset:
         self.raw_test_df = self._load_dataset(self.TEST_SET_PATH, self.TEST_DF_PATH)
         if subset < 1.0:
             self.raw_train_df = self._get_portion(self.raw_train_df, subset)
+            self.raw_test_df = self._get_portion(self.raw_test_df, subset)
 
     def _add_end_index(self, df):
         """
@@ -127,11 +128,11 @@ class SquadDataset:
         """
         Returns a random subset of the whole dataframe
         """
-        amount = df.shape[0] * subset
+        amount = int(df.shape[0] * subset)
         random_indexes = np.random.choice(
             np.arange(df.shape[0]), size=amount, replace=False
         )
-        return df.iloc[random_indexes]
+        return df.iloc[random_indexes].reset_index(drop=True)
 
 
 class SquadDataManager:
@@ -139,12 +140,13 @@ class SquadDataManager:
     SQuAD question answering dataset and tokenizer handler
     """
 
-    def __init__(self, dataset, tokenizer, val_split=0.2):
+    def __init__(self, dataset, tokenizer, val_split=0.2, device="cpu"):
         assert isinstance(dataset, SquadDataset)
         assert isinstance(tokenizer, SquadTokenizer)
         self.dataset = dataset
         self.tokenizer = tokenizer
         self.val_split = val_split
+        self.device = device
 
         # Preprocess DataFrames and perform train/val split
         self.train_df, self.val_df = self._train_val_split(
@@ -193,7 +195,9 @@ class SquadDataManager:
         for i, (c, s, e) in enumerate(
             zip(tokenized_contexts, whole_answers_start, whole_answers_end)
         ):
-            offsets = torch.tensor(c.offsets)[torch.tensor(c.attention_mask).bool()]
+            offsets = torch.tensor(c.offsets, device=self.device)[
+                torch.tensor(c.attention_mask, device=self.device).bool()
+            ]
             start_index = torch.nonzero(offsets[:, 0] == s)
             end_index = torch.nonzero(offsets[:, 1] == e)
             if len(start_index) == 0 or len(end_index) == 0:
@@ -243,6 +247,7 @@ class SquadTokenizer:
     for the SQuAD dataset
     """
 
+    NAME = "tokenizer"
     ENCODING_ATTR = [
         "ids",
         "type_ids",
@@ -256,6 +261,9 @@ class SquadTokenizer:
     ENCODING_ATTR_ID = {k: i for i, k in enumerate(ENCODING_ATTR)}
     ATTRGETTER = attrgetter(*ENCODING_ATTR)
 
+    def __init__(self, device="cpu"):
+        self.device = device
+
     def tokenize(self, inputs, entity=None, special=False):
         tokenizer = self.select_tokenizer(entity)
         tokenizer_padding = tokenizer.padding
@@ -265,22 +273,33 @@ class SquadTokenizer:
         tokenizer.enable_padding(**tokenizer_padding)
         return outputs
 
+    def detokenize(self, inputs, entity=None, special=True):
+        tokenizer = self.select_tokenizer(entity)
+        return tokenizer.decode_batch(inputs, skip_special_tokens=not special)
+
+    def get_pad_token_id(self):
+        tokenizer = self.select_tokenizer(entity="context")
+        return tokenizer.padding["pad_id"]
+
     def find_tokenized_answer_indexes(self, offsets, starts, ends):
         batch_size = len(starts)
         max_answers = max([len(row) for row in starts])
-        indexes = torch.full((batch_size, max_answers, 2), -1)
+        indexes = torch.full((batch_size, max_answers, 2), -100, device=self.device)
         for i, (start, end) in enumerate(zip(starts, ends)):
             for j, (s, e) in enumerate(zip(start, end)):
                 start_index = torch.nonzero(offsets[i, :, 0] == s)
                 end_index = torch.nonzero(offsets[i, :, 1] == e)
                 if len(start_index) > 0 and len(end_index) > 0:
-                    print(start_index, end_index)
-                    indexes[i, j, :] = torch.tensor([start_index, end_index])
+                    indexes[i, j, :] = torch.tensor(
+                        [start_index, end_index], device=self.device
+                    )
         return indexes
 
     def find_subword_indexes(self, word_ids, start_id=1, fill_id=0, end_id=2):
-        start_mask = torch.full((len(word_ids), len(word_ids[0])), False)
-        end_mask = torch.full_like(start_mask, False)
+        start_mask = torch.full(
+            (len(word_ids), len(word_ids[0])), False, device=self.device
+        )
+        end_mask = torch.full_like(start_mask, False, device=self.device)
 
         for i, word_id in enumerate(word_ids):
 
@@ -313,8 +332,10 @@ class StandardSquadTokenizer(SquadTokenizer):
     (one for questions and one for contexts)
     """
 
-    def __init__(self, question_tokenizer, context_tokenizer):
-        super().__init__()
+    NAME = "standard-tokenizer"
+
+    def __init__(self, question_tokenizer, context_tokenizer, device="cpu"):
+        super().__init__(device=device)
         assert isinstance(question_tokenizer, Tokenizer)
         assert isinstance(context_tokenizer, Tokenizer)
         self.question_tokenizer = question_tokenizer
@@ -327,32 +348,50 @@ class StandardSquadTokenizer(SquadTokenizer):
         )
 
     def __call__(self, inputs):
-        (question_ids, questions, contexts, answers_start, answers_end) = zip(*inputs)
-        tokenized_questions = self.tokenize(questions, "question", special=True)
-        tokenized_contexts = self.tokenize(contexts, "context", special=True)
+        (indexes, questions, contexts, answers_start, answers_end) = zip(*inputs)
+        tokenized_questions = self.tokenize(questions, entity="question", special=True)
+        tokenized_contexts = self.tokenize(contexts, entity="context", special=True)
         qattr = list(zip(*[self.ATTRGETTER(e) for e in tokenized_questions]))
         cattr = list(zip(*[self.ATTRGETTER(e) for e in tokenized_contexts]))
 
         # Create the batch dictionary with encoding info
         batch = {
-            "question_ids": torch.tensor(qattr[self.ENCODING_ATTR_ID["ids"]]),
-            "question_type_ids": torch.tensor(qattr[self.ENCODING_ATTR_ID["type_ids"]]),
+            "question_ids": torch.tensor(
+                qattr[self.ENCODING_ATTR_ID["ids"]], device=self.device
+            ),
+            "question_type_ids": torch.tensor(
+                qattr[self.ENCODING_ATTR_ID["type_ids"]], device=self.device
+            ),
             "question_attention_mask": torch.tensor(
-                qattr[self.ENCODING_ATTR_ID["attention_mask"]], dtype=torch.bool
+                qattr[self.ENCODING_ATTR_ID["attention_mask"]],
+                dtype=torch.bool,
+                device=self.device,
             ),
             "question_special_tokens_mask": torch.tensor(
-                qattr[self.ENCODING_ATTR_ID["special_tokens_mask"]], dtype=torch.bool
+                qattr[self.ENCODING_ATTR_ID["special_tokens_mask"]],
+                dtype=torch.bool,
+                device=self.device,
             ),
-            "context_ids": torch.tensor(cattr[self.ENCODING_ATTR_ID["ids"]]),
-            "context_type_ids": torch.tensor(cattr[self.ENCODING_ATTR_ID["type_ids"]]),
+            "context_ids": torch.tensor(
+                cattr[self.ENCODING_ATTR_ID["ids"]], device=self.device
+            ),
+            "context_type_ids": torch.tensor(
+                cattr[self.ENCODING_ATTR_ID["type_ids"]], device=self.device
+            ),
             "context_attention_mask": torch.tensor(
-                cattr[self.ENCODING_ATTR_ID["attention_mask"]], dtype=torch.bool
+                cattr[self.ENCODING_ATTR_ID["attention_mask"]],
+                dtype=torch.bool,
+                device=self.device,
             ),
             "context_special_tokens_mask": torch.tensor(
-                cattr[self.ENCODING_ATTR_ID["special_tokens_mask"]], dtype=torch.bool
+                cattr[self.ENCODING_ATTR_ID["special_tokens_mask"]],
+                dtype=torch.bool,
+                device=self.device,
             ),
-            "context_offsets": torch.tensor(cattr[self.ENCODING_ATTR_ID["offsets"]]),
-            "question_hash_ids": question_ids,
+            "context_offsets": torch.tensor(
+                cattr[self.ENCODING_ATTR_ID["offsets"]], device=self.device
+            ),
+            "indexes": torch.tensor(indexes, dtype=torch.long, device=self.device),
         }
 
         # Add custom info to the batch dict
@@ -384,8 +423,10 @@ class BertSquadTokenizer(SquadTokenizer):
     a BERT model
     """
 
-    def __init__(self, tokenizer):
-        super().__init__()
+    NAME = "bert-tokenizer"
+
+    def __init__(self, tokenizer, device="cpu"):
+        super().__init__(device=device)
         assert isinstance(tokenizer, Tokenizer) or isinstance(tokenizer, BaseTokenizer)
         self.tokenizer = tokenizer
 
@@ -393,22 +434,32 @@ class BertSquadTokenizer(SquadTokenizer):
         return self.tokenizer
 
     def __call__(self, inputs):
-        (question_ids, questions, contexts, answers_start, answers_end) = zip(*inputs)
+        (indexes, questions, contexts, answers_start, answers_end) = zip(*inputs)
         tokenized = self.tokenize(list(zip(questions, contexts)), special=True)
         attr = list(zip(*[self.ATTRGETTER(e) for e in tokenized]))
 
         # Create the batch dictionary with encoding info
         batch = {
-            "context_ids": torch.tensor(attr[self.ENCODING_ATTR_ID["ids"]]),
-            "context_type_ids": torch.tensor(attr[self.ENCODING_ATTR_ID["type_ids"]]),
+            "context_ids": torch.tensor(
+                attr[self.ENCODING_ATTR_ID["ids"]], device=self.device
+            ),
+            "context_type_ids": torch.tensor(
+                attr[self.ENCODING_ATTR_ID["type_ids"]], device=self.device
+            ),
             "attention_mask": torch.tensor(
-                attr[self.ENCODING_ATTR_ID["attention_mask"]], dtype=torch.bool
+                attr[self.ENCODING_ATTR_ID["attention_mask"]],
+                dtype=torch.bool,
+                device=self.device,
             ),
             "special_tokens_mask": torch.tensor(
-                attr[self.ENCODING_ATTR_ID["special_tokens_mask"]], dtype=torch.bool
+                attr[self.ENCODING_ATTR_ID["special_tokens_mask"]],
+                dtype=torch.bool,
+                device=self.device,
             ),
-            "offsets": torch.tensor(attr[self.ENCODING_ATTR_ID["offsets"]]),
-            "question_hash_ids": question_ids,
+            "offsets": torch.tensor(
+                attr[self.ENCODING_ATTR_ID["offsets"]], device=self.device
+            ),
+            "indexes": torch.tensor(indexes, dtype=torch.long, device=self.device),
         }
 
         # Add custom info to the batch dict
@@ -445,9 +496,8 @@ class SquadTorchDataset(Dataset):
 
     def __getitem__(self, index):
         assert isinstance(index, int)
-        question_id = self.df.loc[index, "question_id"]
         question = self.df.loc[index, "question"]
         context = self.df.loc[index, "context"]
         answer_start = self.df.loc[index, "answer_start"]
         answer_end = self.df.loc[index, "answer_end"]
-        return question_id, question, context, answer_start, answer_end
+        return index, question, context, answer_start, answer_end

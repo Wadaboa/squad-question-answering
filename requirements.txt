@@ -7,5 +7,5 @@ nltk==3.5
 gensim==3.8.3
 ipykernel==5.3.4
 torch==1.7.0
-transformers==4.1.1
+transformers==4.2.1
 wandb==0.10.12
