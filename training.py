@@ -73,9 +73,9 @@ class SquadTrainer(transformers.Trainer):
 
         # Ensure to work with numpy arrays
         if isinstance(labels, torch.Tensor):
-            labels = labels.numpy()
+            labels = labels.cpu().numpy()
         if isinstance(preds, torch.Tensor):
-            preds = preds.numpy()
+            preds = preds.cpu().numpy()
         f_labels, f_preds = labels.flatten(), preds.flatten()
 
         # Return a dictionary of metrics, as required by the Trainer

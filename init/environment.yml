@@ -17,7 +17,7 @@ dependencies:
   - pytorch==1.7.1
   - gensim==3.8.3
   - transformers==4.2.1
-  - wandb==0.10.13
+  - wandb==0.10.14
   - pip:
       - black==20.8b1
       - nltk==3.5

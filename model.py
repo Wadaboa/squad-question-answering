@@ -63,7 +63,7 @@ class QAOutput(nn.Module):
         end_indexes = end_probs.argmax(dim=1, keepdims=True)
         indexes = torch.stack(
             start_probs.shape[0] * [torch.arange(start_probs.shape[1])]
-        )
+        ).to(self.device)
         masked_start = torch.where(
             indexes <= end_indexes,
             start_probs,
@@ -89,7 +89,9 @@ class QAOutput(nn.Module):
 
         ########### inputs["context_attention_mask"] to start_probs or masked_start?
         end_best_indexes = end_probs.argmax(dim=1, keepdims=True)
-        indexes = torch.stack(end_probs.shape[0] * [torch.arange(end_probs.shape[1])])
+        indexes = torch.stack(
+            end_probs.shape[0] * [torch.arange(end_probs.shape[1])]
+        ).to(self.device)
         masked_start = (
             (indexes <= end_best_indexes)
             & inputs["context_attention_mask"]
@@ -179,10 +181,13 @@ class QABaselineModel(nn.Module):
         average all the output layers
         """
         packed_questions = pack_padded_sequence(
-            questions, question_lenghts, batch_first=True, enforce_sorted=False
+            questions, question_lenghts.cpu(), batch_first=True, enforce_sorted=False
         )
         packed_contexts = pack_padded_sequence(
-            contexts, context_lenghts, batch_first=True, enforce_sorted=False,
+            contexts,
+            context_lenghts.cpu(),
+            batch_first=True,
+            enforce_sorted=False,
         )
         output_questions, (hidden, cell) = self.recurrent_module(packed_questions)
         output_contexts, (hidden, cell) = self.recurrent_module(packed_contexts)
@@ -193,8 +198,10 @@ class QABaselineModel(nn.Module):
             output_contexts, batch_first=True
         )
         return (
-            padded_questions.sum(dim=1) / padded_questions_lenghts.view(-1, 1),
-            padded_contexts.sum(dim=1) / padded_contexts_lenghts.view(-1, 1),
+            padded_questions.sum(dim=1)
+            / padded_questions_lenghts.to(self.device).view(-1, 1),
+            padded_contexts.sum(dim=1)
+            / padded_contexts_lenghts.to(self.device).view(-1, 1),
         )
 
     def _merge_embeddings(self, questions, contexts):
@@ -332,9 +339,7 @@ class QABiDAFModel(nn.Module):
         contextual_bidirectional=False,
         device="cpu",
     ):
-        """
-
-        """
+        """"""
         super().__init__()
 
         # Embedding module
