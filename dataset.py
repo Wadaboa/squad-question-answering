@@ -82,7 +82,10 @@ class SquadDataset:
         starting from a specifically-formatted JSON
         """
         if os.path.exists(dataframe_path):
-            return pd.read_pickle(dataframe_path)
+            try:
+                return pd.read_pickle(dataframe_path)
+            except ValueError:
+                pass
 
         # Read JSON file
         file = json.loads(open(dataset_path).read())
