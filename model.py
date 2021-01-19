@@ -472,7 +472,7 @@ class QABertModel(nn.Module):
         outputs = self.output_layer(bert_outputs, bert_outputs, **inputs)
         return outputs
 
-    
+
     def state_dict(self):
         st_dict = super().state_dict()
         return {k: st_dict[k] for k in st_dict.keys() if not k.startswith(self.IGNORE_LAYERS)}

@@ -7,9 +7,14 @@ import sklearn
 import torch
 import transformers
 from transformers.trainer_pt_utils import nested_detach
-from transformers.trainer_utils import EvalPrediction, PredictionOutput, speed_metrics
+from transformers.trainer_utils import (
+    EvalPrediction,
+    PREFIX_CHECKPOINT_DIR,
+    PredictionOutput,
+    speed_metrics,
+)
 from transformers.integrations import WandbCallback
-from transformers.file_utils import ENV_VARS_TRUE_VALUES,is_torch_tpu_available
+from transformers.file_utils import ENV_VARS_TRUE_VALUES, is_torch_tpu_available
 
 import utils
 
@@ -138,14 +143,14 @@ class SquadTrainer(transformers.Trainer):
             label_ids=output.label_ids,
             metrics=output.metrics,
         )
-    
+
+
 class CustomWandbCallback(WandbCallback):
-    
     def __init__(self):
         super().__init__()
-    
+
     def setup(self, args, state, model, reinit, **kwargs):
-        
+
         if self._wandb is None:
             return
         self._initialized = True
@@ -165,7 +170,7 @@ class CustomWandbCallback(WandbCallback):
 
             self._wandb.init(
                 project=os.getenv("WANDB_PROJECT", "squad-qa"),
-                group=os.getenv("WANDB_RUN_GROUP",None),
+                group=os.getenv("WANDB_RUN_GROUP", None),
                 config=combined_dict,
                 name=run_name,
                 reinit=True,
@@ -175,8 +180,23 @@ class CustomWandbCallback(WandbCallback):
             # keep track of model topology and gradients, unsupported on TPU
             if not is_torch_tpu_available() and os.getenv("WANDB_WATCH") != "false":
                 self._wandb.watch(
-                    model, log=os.getenv("WANDB_WATCH", "gradients"), log_freq=max(100, args.logging_steps)
+                    model,
+                    log=os.getenv("WANDB_WATCH", "gradients"),
+                    log_freq=max(100, args.logging_steps),
                 )
 
             # log outputs
-            self._log_model = os.getenv("WANDB_LOG_MODEL", "FALSE").upper() in ENV_VARS_TRUE_VALUES.union({"TRUE"})
+            self._log_model = os.getenv(
+                "WANDB_LOG_MODEL", "FALSE"
+            ).upper() in ENV_VARS_TRUE_VALUES.union({"TRUE"})
+
+    def on_epoch_begin(self, args, state, control, **kwargs):
+        self._save_checkpoint(args.output_dir, state.global_step)
+
+    def on_train_end(self, args, state, control, **kwargs):
+        self._save_checkpoint(args.output_dir, state.global_step)
+
+    def _save_checkpoint(self, output_dir, step):
+        checkpoint_path = f"{output_dir}/checkpoint-{step}"
+        if os.path.exists(checkpoint_path):
+            self._wandb.save(f"{checkpoint_path}/*")
