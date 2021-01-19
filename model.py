@@ -126,6 +126,8 @@ class QAOutput(nn.Module):
 
 
 class QABaselineModel(nn.Module):
+    IGNORE_LAYERS = ["embedding.weight"]
+
     def __init__(
         self,
         embedding_module,
@@ -226,6 +228,13 @@ class QABaselineModel(nn.Module):
         merged_inputs = self._merge_embeddings(sentence_questions, sentence_contexts)
 
         return self.output_layer(merged_inputs, merged_inputs, **inputs)
+
+    def state_dict(self):
+        st_dict = super().state_dict()
+        return {k: st_dict[k] for k in st_dict.keys() if k not in self.IGNORE_LAYERS}
+
+    def load_state_dict(self, state_dict, strict=False):
+        return super().load_state_dict(state_dict, strict=strict)
 
 
 class Highway(nn.Module):
@@ -330,6 +339,8 @@ class AttentionFlow(nn.Module):
 
 
 class QABiDAFModel(nn.Module):
+    IGNORE_LAYERS = ["word_embedding.weight"]
+
     def __init__(
         self,
         embedding_module,
@@ -429,8 +440,18 @@ class QABiDAFModel(nn.Module):
             **inputs,
         )
 
+    def state_dict(self):
+        st_dict = super().state_dict()
+        return {k: st_dict[k] for k in st_dict.keys() if k not in self.IGNORE_LAYERS}
+
+    def load_state_dict(self, state_dict, strict=False):
+        return super().load_state_dict(state_dict, strict=strict)
+
 
 class QABertModel(nn.Module):
+
+    IGNORE_LAYERS = "bert_model"
+
     def __init__(self, dropout_rate=0.2, device="cpu"):
         super().__init__()
         self.bert_model = transformers.BertModel.from_pretrained("bert-base-uncased")
@@ -450,3 +471,11 @@ class QABertModel(nn.Module):
         bert_outputs = self.bert_model(**bert_inputs)[0]
         outputs = self.output_layer(bert_outputs, bert_outputs, **inputs)
         return outputs
+
+    
+    def state_dict(self):
+        st_dict = super().state_dict()
+        return {k: st_dict[k] for k in st_dict.keys() if not k.startswith(self.IGNORE_LAYERS)}
+
+    def load_state_dict(self, state_dict, strict=False):
+        return super().load_state_dict(state_dict, strict=strict)

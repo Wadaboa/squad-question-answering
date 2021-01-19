@@ -1,5 +1,6 @@
 import collections
 import time
+import os
 
 import numpy as np
 import sklearn
@@ -7,6 +8,8 @@ import torch
 import transformers
 from transformers.trainer_pt_utils import nested_detach
 from transformers.trainer_utils import EvalPrediction, PredictionOutput, speed_metrics
+from transformers.integrations import WandbCallback
+from transformers.file_utils import ENV_VARS_TRUE_VALUES,is_torch_tpu_available
 
 import utils
 
@@ -19,6 +22,8 @@ class SquadTrainer(transformers.Trainer):
     def __init__(self, *args, **kwargs):
         kwargs["compute_metrics"] = self.compute_metrics
         super(SquadTrainer, self).__init__(*args, **kwargs)
+        self.remove_callback(WandbCallback)
+        self.add_callback(CustomWandbCallback)
 
     def compute_loss(self, model, inputs):
         """
@@ -133,3 +138,45 @@ class SquadTrainer(transformers.Trainer):
             label_ids=output.label_ids,
             metrics=output.metrics,
         )
+    
+class CustomWandbCallback(WandbCallback):
+    
+    def __init__(self):
+        super().__init__()
+    
+    def setup(self, args, state, model, reinit, **kwargs):
+        
+        if self._wandb is None:
+            return
+        self._initialized = True
+        if state.is_world_process_zero:
+            combined_dict = {**args.to_sanitized_dict()}
+
+            if hasattr(model, "config") and model.config is not None:
+                model_config = model.config.to_dict()
+                combined_dict = {**model_config, **combined_dict}
+            trial_name = state.trial_name
+            init_args = {}
+            if trial_name is not None:
+                run_name = trial_name
+                init_args["group"] = args.run_name
+            else:
+                run_name = args.run_name
+
+            self._wandb.init(
+                project=os.getenv("WANDB_PROJECT", "squad-qa"),
+                group=os.getenv("WANDB_RUN_GROUP",None),
+                config=combined_dict,
+                name=run_name,
+                reinit=True,
+                **init_args,
+            )
+
+            # keep track of model topology and gradients, unsupported on TPU
+            if not is_torch_tpu_available() and os.getenv("WANDB_WATCH") != "false":
+                self._wandb.watch(
+                    model, log=os.getenv("WANDB_WATCH", "gradients"), log_freq=max(100, args.logging_steps)
+                )
+
+            # log outputs
+            self._log_model = os.getenv("WANDB_LOG_MODEL", "FALSE").upper() in ENV_VARS_TRUE_VALUES.union({"TRUE"})

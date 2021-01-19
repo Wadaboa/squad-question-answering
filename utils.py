@@ -44,7 +44,7 @@ def get_run_name():
     """
     Return a unique wandb run name
     """
-    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.datetime.now().strftime("%Y-%m-%d--%H-%M-%S")
 
 
 def load_embedding_model(model_name, embedding_dimension=50):
