@@ -9,7 +9,6 @@ import transformers
 from transformers.trainer_pt_utils import nested_detach
 from transformers.trainer_utils import (
     EvalPrediction,
-    PREFIX_CHECKPOINT_DIR,
     PredictionOutput,
     speed_metrics,
 )
@@ -129,9 +128,8 @@ class SquadTrainer(transformers.Trainer):
         for span, index in zip(
             output.predictions[1].tolist(), output.predictions[2].tolist()
         ):
-            answers_dict[
-                test_dataset.df.loc[index, "question_id"]
-            ] = test_dataset.df.loc[index, "context"][span[0] : span[1] + 1]
+            answer = test_dataset.df.loc[index, "context"][span[0] : span[1] + 1]
+            answers_dict[test_dataset.df.loc[index, "question_id"]] = answer.strip()
 
         # Update metrics and patch the predictions attribute
         # with the computed answers

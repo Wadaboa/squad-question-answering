@@ -9,6 +9,18 @@ from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_se
 
 import utils
 
+def get_embedding_module(embedding_model, pad_id):
+    embedding_layer = nn.Embedding(
+        embedding_model.vectors.shape[0],
+        embedding_model.vectors.shape[1],
+        padding_idx=pad_id,
+    )
+    embedding_layer.weight = nn.Parameter(
+        torch.from_numpy(embedding_model.vectors)
+    )
+    embedding_layer.weight.requires_grad = False
+    return embedding_layer
+
 
 class MaskedSoftmax(nn.Module):
     def __init__(self, dim, log=False, eps=1e-4, device="cpu"):
@@ -53,7 +65,7 @@ class QAOutput(nn.Module):
 
         # Loss criterion
         self.softmax = MaskedSoftmax(dim=1, log=True, device=device)
-        self.criterion = nn.NLLLoss(reduction="mean", ignore_index=-1)
+        self.criterion = nn.NLLLoss(reduction="mean", ignore_index=-100)
 
         # Transfer model to device
         self.device = device
@@ -106,18 +118,26 @@ class QAOutput(nn.Module):
         )
 
         outputs = self.get_qa_outputs(start_probs, end_probs)
-        answers = utils.get_nearest_answers(
-            inputs["answers"], outputs, device=self.device
-        )
-
-        start_loss = self.criterion(start_probs, answers[:, 0])
-        end_loss = self.criterion(end_probs, answers[:, 1])
-        loss = start_loss + end_loss
-
         word_outputs = self.from_token_to_char(inputs["context_offsets"], outputs)
+
+        if "answers" in inputs:
+            answers = utils.get_nearest_answers(
+                inputs["answers"], outputs, device=self.device
+            )
+            start_loss = self.criterion(start_probs, answers[:, 0])
+            end_loss = self.criterion(end_probs, answers[:, 1])
+            loss = (start_loss + end_loss) / 2
+            return OrderedDict(
+                {
+                    "loss": loss,
+                    "token_outputs": outputs,
+                    "word_outputs": word_outputs,
+                    "indexes": inputs["indexes"],
+                }
+            )
+
         return OrderedDict(
             {
-                "loss": loss,
                 "token_outputs": outputs,
                 "word_outputs": word_outputs,
                 "indexes": inputs["indexes"],
@@ -186,10 +206,7 @@ class QABaselineModel(nn.Module):
             questions, question_lenghts.cpu(), batch_first=True, enforce_sorted=False
         )
         packed_contexts = pack_padded_sequence(
-            contexts,
-            context_lenghts.cpu(),
-            batch_first=True,
-            enforce_sorted=False,
+            contexts, context_lenghts.cpu(), batch_first=True, enforce_sorted=False,
         )
         output_questions, (hidden, cell) = self.recurrent_module(packed_questions)
         output_contexts, (hidden, cell) = self.recurrent_module(packed_contexts)
@@ -456,7 +473,7 @@ class QABertModel(nn.Module):
         super().__init__()
         self.bert_model = transformers.BertModel.from_pretrained("bert-base-uncased")
         self.output_layer = QAOutput(
-            768, 1, dropout_rate=dropout_rate, classifier_bias=True, device=device
+            768, 1, dropout_rate=dropout_rate, classifier_bias=False, device=device
         )
 
         self.device = device
@@ -472,10 +489,19 @@ class QABertModel(nn.Module):
         outputs = self.output_layer(bert_outputs, bert_outputs, **inputs)
         return outputs
 
+    def count_parameters(self):
+        """
+        Return the total number of trainable parameters in the model
+        """
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
     def state_dict(self):
         st_dict = super().state_dict()
-        return {k: st_dict[k] for k in st_dict.keys() if not k.startswith(self.IGNORE_LAYERS)}
+        return {
+            k: st_dict[k]
+            for k in st_dict.keys()
+            if not k.startswith(self.IGNORE_LAYERS)
+        }
 
     def load_state_dict(self, state_dict, strict=False):
         return super().load_state_dict(state_dict, strict=strict)

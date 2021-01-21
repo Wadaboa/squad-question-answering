@@ -1,15 +1,12 @@
 import json
 import os
-import uuid
-from functools import partial
-from operator import attrgetter
 
 import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import Dataset, DataLoader
-from tokenizers import Tokenizer
-from tokenizers.implementations import BaseTokenizer
+from torch.utils.data import Dataset
+
+from tokenizer import SquadTokenizer
 
 
 class SquadDataset:
@@ -17,43 +14,36 @@ class SquadDataset:
     SQuAD question answering raw dataset wrapper
     """
 
-    NAME = "squad"
-    COLUMNS = [
-        "question_id",
-        "question",
-        "title",
-        "context_id",
-        "context",
-        "answer",
-        "answer_start",
-        "answer_end",
-    ]
     JSON_RECORD_PATH = ["data", "paragraphs", "qas", "answers"]
 
-    DATA_FOLDER = os.path.join(os.getcwd(), "data")
-    TRAIN_DATA_FOLDER = os.path.join(DATA_FOLDER, "training")
-    TRAIN_SET_PATH = os.path.join(TRAIN_DATA_FOLDER, "training_set.json")
-    TRAIN_DF_PATH = os.path.join(TRAIN_DATA_FOLDER, f"{NAME}_train_df.pkl")
-    TEST_DATA_FOLDER = os.path.join(DATA_FOLDER, "testing")
-    TEST_SET_PATH = os.path.join(TEST_DATA_FOLDER, "test_set.json")
-    TEST_DF_PATH = os.path.join(TEST_DATA_FOLDER, f"{NAME}_test_df.pkl")
-
     def __init__(
-        self, subset=1.0,
+        self, train_set_path=None, test_set_path=None, subset=1.0,
     ):
-        assert os.path.exists(
-            self.TRAIN_SET_PATH
-        ), "Missing SQuAD training set .json file"
-        assert os.path.exists(
-            self.TEST_SET_PATH
-        ), "Missing SQuAD testing set .json file"
+        self.train_set_path = train_set_path
+        self.test_set_path = test_set_path
 
-        # Prepare the dataset and load the dataframe
-        self.raw_train_df = self._load_dataset(self.TRAIN_SET_PATH, self.TRAIN_DF_PATH)
-        self.raw_test_df = self._load_dataset(self.TEST_SET_PATH, self.TEST_DF_PATH)
-        if subset < 1.0:
-            self.raw_train_df = self._get_portion(self.raw_train_df, subset)
-            self.raw_test_df = self._get_portion(self.raw_test_df, subset)
+        self.raw_train_df = None
+        if self.train_set_path is not None:
+            assert os.path.exists(
+                self.train_set_path
+            ), "Missing SQuAD training set .json file"
+            self.train_df_path = f"{os.path.splitext(self.train_set_path)[0]}.pkl"
+            self.raw_train_df = self._load_dataset(
+                self.train_set_path, self.train_df_path
+            )
+            if subset < 1.0:
+                self.raw_train_df = self._get_portion(self.raw_train_df, subset)
+
+        self.raw_test_df = None
+        if self.test_set_path:
+            assert os.path.exists(
+                self.test_set_path
+            ), "Missing SQuAD testing set .json file"
+            self.test_df_path = f"{os.path.splitext(self.test_set_path)[0]}.pkl"
+            self.raw_test_df = self._load_dataset(self.test_set_path, self.test_df_path)
+            self.test_has_labels = "answer" in self.raw_test_df.columns
+            if subset < 1.0:
+                self.raw_test_df = self._get_portion(self.raw_test_df, subset)
 
     def _add_end_index(self, df):
         """
@@ -70,33 +60,47 @@ class SquadDataset:
         df["answer_end"] = ans_end
         return df
 
-    def _remove_duplicated_answers(self, df):
-        """
-        Remove duplicated rows from the given DataFrame
-        """
-        return df.drop_duplicates()
-
     def _load_dataset(self, dataset_path, dataframe_path):
         """
         Loads the SQuAD dataset into a Pandas DataFrame, 
         starting from a specifically-formatted JSON
         """
+        # Load the DataFrame, if it was already pickled before
         if os.path.exists(dataframe_path):
             try:
                 return pd.read_pickle(dataframe_path)
             except ValueError:
                 pass
 
-        # Read JSON file
-        file = json.loads(open(dataset_path).read())
+        # Check if the dataset has labels or not
+        json_file = json.loads(open(dataset_path).read())
+        try:
+            pd.json_normalize(json_file, self.JSON_RECORD_PATH)
+            df = self._load_dataset_with_labels(json_file)
+        except KeyError:
+            df = self._load_dataset_no_labels(json_file)
 
+        # Remove duplicated rows
+        df = df.drop_duplicates().reset_index(drop=True)
+
+        # Save the dataframe to a pickle file
+        df.to_pickle(dataframe_path)
+
+        return df
+
+    def _load_dataset_with_labels(self, json_file):
+        """
+        Load a SQUaD dataset that has labels
+        """
         # Flatten JSON
-        df = pd.json_normalize(file, self.JSON_RECORD_PATH, meta=[["data", "title"]])
+        df = pd.json_normalize(
+            json_file, self.JSON_RECORD_PATH, meta=[["data", "title"]]
+        )
         df_questions = pd.json_normalize(
-            file, self.JSON_RECORD_PATH[:-1], meta=[["data", "title"]]
+            json_file, self.JSON_RECORD_PATH[:-1], meta=[["data", "title"]]
         )
         df_contexts = pd.json_normalize(
-            file, self.JSON_RECORD_PATH[:-2], meta=[["data", "title"]]
+            json_file, self.JSON_RECORD_PATH[:-2], meta=[["data", "title"]]
         )
 
         # Build the flattened Pandas DataFrame
@@ -114,18 +118,35 @@ class SquadDataset:
         # Rename columns
         df.rename(columns={"data.title": "title", "text": "answer"}, inplace=True)
 
-        # Add end index for answers and remove duplicated ones
+        # Add end index for answers
         df = self._add_end_index(df)
-        df = self._remove_duplicated_answers(df)
-
-        # Order columns and reset index
-        df = df[self.COLUMNS]
-        df = df.reset_index(drop=True)
-
-        # Save the dataframe to a pickle file
-        df.to_pickle(dataframe_path)
 
         return df
+
+    def _load_dataset_no_labels(self, json_file):
+        """
+        Load a SQUaD dataset that has no labels
+        """
+        # Flatten JSON
+        df_questions = pd.json_normalize(
+            json_file, self.JSON_RECORD_PATH[:-1], meta=[["data", "title"]]
+        )
+        df_contexts = pd.json_normalize(
+            json_file, self.JSON_RECORD_PATH[:-2], meta=[["data", "title"]]
+        )
+
+        # Build the flattened Pandas DataFrame
+        df_questions["context"] = np.repeat(
+            df_contexts["context"].values, df_contexts.qas.str.len()
+        )
+        df_questions["context_id"] = df_questions["context"].factorize()[0]
+
+        # Rename columns
+        df_questions.rename(
+            columns={"data.title": "title", "id": "question_id"}, inplace=True
+        )
+
+        return df_questions
 
     def _get_portion(self, df, subset=1.0):
         """
@@ -152,15 +173,18 @@ class SquadDataManager:
         self.device = device
 
         # Preprocess DataFrames and perform train/val split
-        self.train_df, self.val_df = self._train_val_split(
-            self.preprocess(self.dataset.raw_train_df.copy()), self.val_split
-        )
-        self.test_df = self.preprocess(self.dataset.raw_test_df.copy())
-
-        # Save PyTorch Dataset instances
-        self.train_dataset = SquadTorchDataset(self.train_df)
-        self.val_dataset = SquadTorchDataset(self.val_df)
-        self.test_dataset = SquadTorchDataset(self.test_df)
+        self.train_dataset, self.val_dataset, self.test_dataset = None, None, None
+        if self.dataset.raw_train_df is not None:
+            self.train_df, self.val_df = self._train_val_split(
+                self.preprocess(self.dataset.raw_train_df.copy()), self.val_split
+            )
+            self.train_dataset = SquadTorchDataset(self.train_df)
+            self.val_dataset = SquadTorchDataset(self.val_df)
+        if self.dataset.raw_test_df is not None:
+            self.test_df = self.dataset.raw_test_df.copy()
+            if self.dataset.test_has_labels:
+                self.test_df = self.preprocess(self.test_df)
+            self.test_dataset = SquadTorchDataset(self.test_df)
 
     def preprocess(self, df):
         """
@@ -198,9 +222,11 @@ class SquadDataManager:
         for i, (c, s, e) in enumerate(
             zip(tokenized_contexts, whole_answers_start, whole_answers_end)
         ):
-            offsets = torch.tensor(c.offsets, device=self.device)[
+            mask = (
                 torch.tensor(c.attention_mask, device=self.device).bool()
-            ]
+                & ~torch.tensor(c.special_tokens_mask, device=self.device).bool()
+            )
+            offsets = torch.tensor(c.offsets, device=self.device)[mask]
             start_index = torch.nonzero(offsets[:, 0] == s)
             end_index = torch.nonzero(offsets[:, 1] == e)
             if len(start_index) == 0 or len(end_index) == 0:
@@ -244,247 +270,6 @@ class SquadDataManager:
         return train_df, val_df
 
 
-class SquadTokenizer:
-    """
-    Abstract tokenizer and data collator interface
-    for the SQuAD dataset
-    """
-
-    NAME = "tokenizer"
-    ENCODING_ATTR = [
-        "ids",
-        "type_ids",
-        "tokens",
-        "offsets",
-        "attention_mask",
-        "special_tokens_mask",
-        "overflowing",
-        "word_ids",
-    ]
-    ENCODING_ATTR_ID = {k: i for i, k in enumerate(ENCODING_ATTR)}
-    ATTRGETTER = attrgetter(*ENCODING_ATTR)
-
-    def __init__(self, device="cpu"):
-        self.device = device
-
-    def tokenize(self, inputs, entity=None, special=False):
-        tokenizer = self.select_tokenizer(entity)
-        tokenizer_padding = tokenizer.padding
-        if not special:
-            tokenizer.no_padding()
-        outputs = tokenizer.encode_batch(inputs, add_special_tokens=special)
-        tokenizer.enable_padding(**tokenizer_padding)
-        return outputs
-
-    def detokenize(self, inputs, entity=None, special=True):
-        tokenizer = self.select_tokenizer(entity)
-        return tokenizer.decode_batch(inputs, skip_special_tokens=not special)
-
-    def get_pad_token_id(self):
-        tokenizer = self.select_tokenizer(entity="context")
-        return tokenizer.padding["pad_id"]
-
-    def find_tokenized_answer_indexes(self, offsets, starts, ends):
-        batch_size = len(starts)
-        max_answers = max([len(row) for row in starts])
-        indexes = torch.full((batch_size, max_answers, 2), -100, device=self.device)
-        for i, (start, end) in enumerate(zip(starts, ends)):
-            for j, (s, e) in enumerate(zip(start, end)):
-                start_index = torch.nonzero(offsets[i, :, 0] == s)
-                end_index = torch.nonzero(offsets[i, :, 1] == e)
-                if len(start_index) > 0 and len(end_index) > 0:
-                    indexes[i, j, :] = torch.tensor(
-                        [start_index, end_index], device=self.device
-                    )
-        return indexes
-
-    def find_subword_indexes(self, word_ids, start_id=1, fill_id=0, end_id=2):
-        start_mask = torch.full(
-            (len(word_ids), len(word_ids[0])), False, device=self.device
-        )
-        end_mask = torch.full_like(start_mask, False, device=self.device)
-
-        for i, word_id in enumerate(word_ids):
-
-            if word_id[0] != None:
-                start_mask[i, 0] = True
-
-            for j in range(1, len(word_id)):
-                if word_id[j] != word_id[j - 1]:
-                    if word_id[j] != None:
-                        start_mask[i, j] = True
-                    if word_id[j - 1] != None:
-                        end_mask[i, j] = True
-
-            if word_id[-1] != None:
-                end_mask[i, -1] = True
-
-        return start_mask, end_mask
-
-    def select_tokenizer(self, entity=None):
-        raise NotImplementedError()
-
-    def __call__(self, inputs):
-        raise NotImplementedError()
-
-
-class StandardSquadTokenizer(SquadTokenizer):
-    """
-    Standard SQuAD tokenizer and data collator,
-    based on the usage of two different tokenizer
-    (one for questions and one for contexts)
-    """
-
-    NAME = "standard-tokenizer"
-
-    def __init__(self, question_tokenizer, context_tokenizer, device="cpu"):
-        super().__init__(device=device)
-        assert isinstance(question_tokenizer, Tokenizer)
-        assert isinstance(context_tokenizer, Tokenizer)
-        self.question_tokenizer = question_tokenizer
-        self.context_tokenizer = context_tokenizer
-
-    def select_tokenizer(self, entity=None):
-        assert entity in ("question", "context")
-        return (
-            self.context_tokenizer if entity == "context" else self.question_tokenizer
-        )
-
-    def __call__(self, inputs):
-        (indexes, questions, contexts, answers_start, answers_end) = zip(*inputs)
-        tokenized_questions = self.tokenize(questions, entity="question", special=True)
-        tokenized_contexts = self.tokenize(contexts, entity="context", special=True)
-        qattr = list(zip(*[self.ATTRGETTER(e) for e in tokenized_questions]))
-        cattr = list(zip(*[self.ATTRGETTER(e) for e in tokenized_contexts]))
-
-        # Create the batch dictionary with encoding info
-        batch = {
-            "question_ids": torch.tensor(
-                qattr[self.ENCODING_ATTR_ID["ids"]], device=self.device
-            ),
-            "question_type_ids": torch.tensor(
-                qattr[self.ENCODING_ATTR_ID["type_ids"]], device=self.device
-            ),
-            "question_attention_mask": torch.tensor(
-                qattr[self.ENCODING_ATTR_ID["attention_mask"]],
-                dtype=torch.bool,
-                device=self.device,
-            ),
-            "question_special_tokens_mask": torch.tensor(
-                qattr[self.ENCODING_ATTR_ID["special_tokens_mask"]],
-                dtype=torch.bool,
-                device=self.device,
-            ),
-            "context_ids": torch.tensor(
-                cattr[self.ENCODING_ATTR_ID["ids"]], device=self.device
-            ),
-            "context_type_ids": torch.tensor(
-                cattr[self.ENCODING_ATTR_ID["type_ids"]], device=self.device
-            ),
-            "context_attention_mask": torch.tensor(
-                cattr[self.ENCODING_ATTR_ID["attention_mask"]],
-                dtype=torch.bool,
-                device=self.device,
-            ),
-            "context_special_tokens_mask": torch.tensor(
-                cattr[self.ENCODING_ATTR_ID["special_tokens_mask"]],
-                dtype=torch.bool,
-                device=self.device,
-            ),
-            "context_offsets": torch.tensor(
-                cattr[self.ENCODING_ATTR_ID["offsets"]], device=self.device
-            ),
-            "indexes": torch.tensor(indexes, dtype=torch.long, device=self.device),
-        }
-
-        # Add custom info to the batch dict
-        masked_offsets = torch.where(
-            batch["context_attention_mask"].unsqueeze(-1).repeat(1, 1, 2),
-            batch["context_offsets"],
-            -1,
-        )
-        batch["answers"] = self.find_tokenized_answer_indexes(
-            masked_offsets, answers_start, answers_end
-        )
-        batch["question_lenghts"] = torch.count_nonzero(
-            batch["question_attention_mask"], dim=1
-        )
-        batch["context_lenghts"] = torch.count_nonzero(
-            batch["context_attention_mask"], dim=1
-        )
-        (
-            batch["subword_start_mask"],
-            batch["subword_end_mask"],
-        ) = self.find_subword_indexes(cattr[self.ENCODING_ATTR_ID["word_ids"]])
-
-        return batch
-
-
-class BertSquadTokenizer(SquadTokenizer):
-    """
-    Tokenizer and data collator to be used with
-    a BERT model
-    """
-
-    NAME = "bert-tokenizer"
-
-    def __init__(self, tokenizer, device="cpu"):
-        super().__init__(device=device)
-        assert isinstance(tokenizer, Tokenizer) or isinstance(tokenizer, BaseTokenizer)
-        self.tokenizer = tokenizer
-
-    def select_tokenizer(self, entity=None):
-        return self.tokenizer
-
-    def __call__(self, inputs):
-        (indexes, questions, contexts, answers_start, answers_end) = zip(*inputs)
-        tokenized = self.tokenize(list(zip(questions, contexts)), special=True)
-        attr = list(zip(*[self.ATTRGETTER(e) for e in tokenized]))
-
-        # Create the batch dictionary with encoding info
-        batch = {
-            "context_ids": torch.tensor(
-                attr[self.ENCODING_ATTR_ID["ids"]], device=self.device
-            ),
-            "context_type_ids": torch.tensor(
-                attr[self.ENCODING_ATTR_ID["type_ids"]], device=self.device
-            ),
-            "attention_mask": torch.tensor(
-                attr[self.ENCODING_ATTR_ID["attention_mask"]],
-                dtype=torch.bool,
-                device=self.device,
-            ),
-            "special_tokens_mask": torch.tensor(
-                attr[self.ENCODING_ATTR_ID["special_tokens_mask"]],
-                dtype=torch.bool,
-                device=self.device,
-            ),
-            "offsets": torch.tensor(
-                attr[self.ENCODING_ATTR_ID["offsets"]], device=self.device
-            ),
-            "indexes": torch.tensor(indexes, dtype=torch.long, device=self.device),
-        }
-
-        # Add custom info to the batch dict
-        batch["context_attention_mask"] = (
-            batch["context_type_ids"].bool() & ~batch["special_tokens_mask"]
-        )
-        batch["context_offsets"] = torch.where(
-            batch["context_attention_mask"].unsqueeze(-1).repeat(1, 1, 2),
-            batch["offsets"],
-            -1,
-        )
-        batch["answers"] = self.find_tokenized_answer_indexes(
-            batch["context_offsets"], answers_start, answers_end
-        )
-        (
-            batch["subword_start_mask"],
-            batch["subword_end_mask"],
-        ) = self.find_subword_indexes(attr[self.ENCODING_ATTR_ID["word_ids"]])
-
-        return batch
-
-
 class SquadTorchDataset(Dataset):
     """
     SQuAD question answering PyTorch Dataset subclass
@@ -501,6 +286,10 @@ class SquadTorchDataset(Dataset):
         assert isinstance(index, int)
         question = self.df.loc[index, "question"]
         context = self.df.loc[index, "context"]
+
+        if "answer" not in self.df.columns:
+            return index, question, context
+
         answer_start = self.df.loc[index, "answer_start"]
         answer_end = self.df.loc[index, "answer_end"]
         return index, question, context, answer_start, answer_end
