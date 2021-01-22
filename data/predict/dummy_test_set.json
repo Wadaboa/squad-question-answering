@@ -8,23 +8,28 @@
             "qas": [
                 {
                 "question": "To whom did the Virgin Mary allegedly appear in 1858 in Lourdes France?",
-                "id": "5733be284776f41900661182"
+                "id": "5733be284776f41900661182",
+                "answers": []
                 },
                 {
                 "question": "What is in front of the Notre Dame Main Building?",
-                "id": "5733be284776f4190066117f"
+                "id": "5733be284776f4190066117f",
+                "answers": []
                 },
                 {
                 "question": "The Basilica of the Sacred heart at Notre Dame is beside to which structure?",
-                "id": "5733be284776f41900661180"
+                "id": "5733be284776f41900661180",
+                "answers": []
                 },
                 {
                 "question": "What is the Grotto at Notre Dame?",
-                "id": "5733be284776f41900661181"
+                "id": "5733be284776f41900661181",
+                "answers": []
                 },
                 {
                 "question": "What sits on top of the Main Building at Notre Dame?",
-                "id": "5733be284776f4190066117e"
+                "id": "5733be284776f4190066117e",
+                "answers": []
                 }
             ]
             },
@@ -33,23 +38,28 @@
             "qas": [
                 {
                 "question": "When did the Scholastic Magazine of Notre dame begin publishing?",
-                "id": "5733bf84d058e614000b61be"
+                "id": "5733bf84d058e614000b61be",
+                "answers": []
                 },
                 {
                 "question": "How often is Notre Dame's the Juggler published?",
-                "id": "5733bf84d058e614000b61bf"
+                "id": "5733bf84d058e614000b61bf",
+                "answers": []
                 },
                 {
                 "question": "What is the daily student paper at Notre Dame called?",
-                "id": "5733bf84d058e614000b61c0"
+                "id": "5733bf84d058e614000b61c0",
+                "answers": []
                 },
                 {
                 "question": "How many student news papers are found at Notre Dame?",
-                "id": "5733bf84d058e614000b61bd"
+                "id": "5733bf84d058e614000b61bd",
+                "answers": []
                 },
                 {
                 "question": "In what year did the student paper Common Sense begin publication at Notre Dame?",
-                "id": "5733bf84d058e614000b61c1"
+                "id": "5733bf84d058e614000b61c1",
+                "answers": []
                 }
             ]
             },
@@ -58,23 +68,28 @@
             "qas": [
                 {
                 "question": "Where is the headquarters of the Congregation of the Holy Cross?",
-                "id": "5733bed24776f41900661188"
+                "id": "5733bed24776f41900661188",
+                "answers": []
                 },
                 {
                 "question": "What is the primary seminary of the Congregation of the Holy Cross?",
-                "id": "5733bed24776f41900661189"
+                "id": "5733bed24776f41900661189",
+                "answers": []
                 },
                 {
                 "question": "What is the oldest structure at Notre Dame?",
-                "id": "5733bed24776f4190066118a"
+                "id": "5733bed24776f4190066118a",
+                "answers": []
                 },
                 {
                 "question": "What individuals live at Fatima House at Notre Dame?",
-                "id": "5733bed24776f4190066118b"
+                "id": "5733bed24776f4190066118b",
+                "answers": []
                 },
                 {
                 "question": "Which prize did Frederick Buechner create?",
-                "id": "5733bed24776f4190066118c"
+                "id": "5733bed24776f4190066118c",
+                "answers": []
                 }
             ]
             },
@@ -83,23 +98,28 @@
             "qas": [
                 {
                 "question": "How many BS level degrees are offered in the College of Engineering at Notre Dame?",
-                "id": "5733a6424776f41900660f51"
+                "id": "5733a6424776f41900660f51",
+                "answers": []
                 },
                 {
                 "question": "In what year was the College of Engineering at Notre Dame formed?",
-                "id": "5733a6424776f41900660f4e"
+                "id": "5733a6424776f41900660f4e",
+                "answers": []
                 },
                 {
                 "question": "Before the creation of the College of Engineering similar studies were carried out at which Notre Dame college?",
-                "id": "5733a6424776f41900660f4f"
+                "id": "5733a6424776f41900660f4f",
+                "answers": []
                 },
                 {
                 "question": "How many departments are within the Stinson-Remick Hall of Engineering?",
-                "id": "5733a6424776f41900660f50"
+                "id": "5733a6424776f41900660f50",
+                "answers": []
                 },
                 {
                 "question": "The College of Science began to offer civil engineering courses beginning at what time at Notre Dame?",
-                "id": "5733a6424776f41900660f52"
+                "id": "5733a6424776f41900660f52",
+                "answers": []
                 }
             ]
             },
@@ -108,19 +128,23 @@
             "qas": [
                 {
                 "question": "What entity provides help with the management of time for new students at Notre Dame?",
-                "id": "5733a70c4776f41900660f64"
+                "id": "5733a70c4776f41900660f64",
+                "answers": []
                 },
                 {
                 "question": "How many colleges for undergraduates are at Notre Dame?",
-                "id": "5733a70c4776f41900660f62"
+                "id": "5733a70c4776f41900660f62",
+                "answers": []
                 },
                 {
                 "question": "What was created at Notre Dame in 1962 to assist first year students?",
-                "id": "5733a70c4776f41900660f63"
+                "id": "5733a70c4776f41900660f63",
+                "answers": []
                 },
                 {
                 "question": "Which organization declared the First Year of Studies program at Notre Dame \"outstanding?\"",
-                "id": "5733a70c4776f41900660f65"
+                "id": "5733a70c4776f41900660f65",
+                "answers": []
                 }
             ]
             },
@@ -129,23 +153,28 @@
             "qas": [
                 {
                 "question": "The granting of Doctorate degrees first occurred in what year at Notre Dame?",
-                "id": "5733a7bd4776f41900660f6b"
+                "id": "5733a7bd4776f41900660f6b",
+                "answers": []
                 },
                 {
                 "question": "What type of degree is an M.Div.?",
-                "id": "5733a7bd4776f41900660f6c"
+                "id": "5733a7bd4776f41900660f6c",
+                "answers": []
                 },
                 {
                 "question": "Which program at Notre Dame offers a Master of Education degree?",
-                "id": "5733a7bd4776f41900660f6e"
+                "id": "5733a7bd4776f41900660f6e",
+                "answers": []
                 },
                 {
                 "question": "In what year was a Master of Arts course first offered at Notre Dame?",
-                "id": "5733a7bd4776f41900660f6a"
+                "id": "5733a7bd4776f41900660f6a",
+                "answers": []
                 },
                 {
                 "question": "Which department at Notre Dame is the only one to not offer a PhD program?",
-                "id": "5733a7bd4776f41900660f6d"
+                "id": "5733a7bd4776f41900660f6d",
+                "answers": []
                 }
             ]
             },
@@ -154,23 +183,28 @@
             "qas": [
                 {
                 "question": "What institute at Notre Dame studies  the reasons for violent conflict?",
-                "id": "5733ac31d058e614000b5ff3"
+                "id": "5733ac31d058e614000b5ff3",
+                "answers": []
                 },
                 {
                 "question": "What is the title of Notre Dame's Theodore Hesburgh?",
-                "id": "5733ac31d058e614000b5ff6"
+                "id": "5733ac31d058e614000b5ff6",
+                "answers": []
                 },
                 {
                 "question": "In what year was the Joan B. Kroc Institute for International Peace Studies founded?",
-                "id": "5733ac31d058e614000b5ff4"
+                "id": "5733ac31d058e614000b5ff4",
+                "answers": []
                 },
                 {
                 "question": "To whom was John B. Kroc married?",
-                "id": "5733ac31d058e614000b5ff5"
+                "id": "5733ac31d058e614000b5ff5",
+                "answers": []
                 },
                 {
                 "question": "What company did Ray Kroc own?",
-                "id": "5733ac31d058e614000b5ff7"
+                "id": "5733ac31d058e614000b5ff7",
+                "answers": []
                 }
             ]
             }
@@ -184,19 +218,23 @@
             "qas": [
                 {
                 "question": "what is the name of the region east of the Rocky Mountains?",
-                "id": "570b61516b8089140040f8fe"
+                "id": "570b61516b8089140040f8fe",
+                "answers": []
                 },
                 {
                 "question": "who brought the term great plains into widespread usage?",
-                "id": "570b61516b8089140040f8ff"
+                "id": "570b61516b8089140040f8ff",
+                "answers": []
                 },
                 {
                 "question": "what year was Nevin Fenneman's study?",
-                "id": "570b61516b8089140040f900"
+                "id": "570b61516b8089140040f900",
+                "answers": []
                 },
                 {
                 "question": "what was theregion called before \"the great plans\"? ",
-                "id": "570b61516b8089140040f901"
+                "id": "570b61516b8089140040f901",
+                "answers": []
                 }
             ]
             },
@@ -205,19 +243,23 @@
             "qas": [
                 {
                 "question": "what type of land is much of the great plans?",
-                "id": "570b6365ec8fbc190045b9c0"
+                "id": "570b6365ec8fbc190045b9c0",
+                "answers": []
                 },
                 {
                 "question": "when did ranchers usually have a cattle round up?",
-                "id": "570b6365ec8fbc190045b9c1"
+                "id": "570b6365ec8fbc190045b9c1",
+                "answers": []
                 },
                 {
                 "question": "in a cattle round up, what did ranchers do to the new calves?",
-                "id": "570b6365ec8fbc190045b9c2"
+                "id": "570b6365ec8fbc190045b9c2",
+                "answers": []
                 },
                 {
                 "question": "from 1866-95 about how many cattle did cowboys herd?",
-                "id": "570b6365ec8fbc190045b9c3"
+                "id": "570b6365ec8fbc190045b9c3",
+                "answers": []
                 }
             ]
             },
@@ -226,23 +268,28 @@
             "qas": [
                 {
                 "question": "who was the spanish conquistador who had encounters with europeans and native americans?",
-                "id": "570b64986b8089140040f91a"
+                "id": "570b64986b8089140040f91a",
+                "answers": []
                 },
                 {
                 "question": "who crossed a section of oklahoma and texas?",
-                "id": "570b64986b8089140040f91b"
+                "id": "570b64986b8089140040f91b",
+                "answers": []
                 },
                 {
                 "question": "what is the section of oklahoma and texas that  Hernando de Soto traveled?",
-                "id": "570b64986b8089140040f91c"
+                "id": "570b64986b8089140040f91c",
+                "answers": []
                 },
                 {
                 "question": "who thought the great plains were the locations of Quivira and C\u00edbola?",
-                "id": "570b64986b8089140040f91d"
+                "id": "570b64986b8089140040f91d",
+                "answers": []
                 },
                 {
                 "question": "what did the spanish think the cities of Quivira and C\u00edbola were rich in?",
-                "id": "570b64986b8089140040f91e"
+                "id": "570b64986b8089140040f91e",
+                "answers": []
                 }
             ]
             }

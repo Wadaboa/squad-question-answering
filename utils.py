@@ -22,6 +22,8 @@ def get_nearest_answers(labels, preds, eps=1e-3, device="cpu"):
     if not isinstance(preds, torch.Tensor):
         preds = torch.tensor(preds, device=device)
 
+    # Compute the euclidean distance between each pair of
+    # related (label, prediction), while ignoring pad values
     distances = torch.where(
         labels != -100,
         torch.pow(preds.unsqueeze(1).repeat(1, labels.shape[1], 1) - labels, 2),
@@ -31,7 +33,12 @@ def get_nearest_answers(labels, preds, eps=1e-3, device="cpu"):
     summed_distances[torch.isnan(summed_distances)] = torch.tensor(
         np.inf, device=device
     )
+
+    # Dirty hack to select only one label, if two or more of them are
+    # at the same distance with the corresponding prediction
     summed_distances += torch.rand(summed_distances.shape, device=device) * eps
+
+    # Consider the closest labels to the given predictions
     min_values, _ = torch.min(summed_distances, dim=1, keepdims=True)
     mask = (summed_distances == min_values).repeat(1, 1, 2)
     return labels[mask].reshape(preds.shape)
@@ -46,11 +53,11 @@ def show_df_row(df, index):
     display(HTML(pd.DataFrame([row]).to_html()))
 
 
-def get_run_name():
+def get_run_name(fmt="%Y-%m-%d--%H-%M-%S"):
     """
     Return a unique wandb run name
     """
-    return datetime.datetime.now().strftime("%Y-%m-%d--%H-%M-%S")
+    return datetime.datetime.now().strftime(fmt)
 
 
 def load_embedding_model(
@@ -64,8 +71,13 @@ def load_embedding_model(
         embedding_model = gloader.load(model)
 
         # Build the unknown vector as the mean of all vectors
+        # (if the mean is already present, use a random vector)
         assert unk_token not in embedding_model, f"{unk_token} key already present"
         unk = np.mean(embedding_model.vectors, axis=0)
+        if unk in embedding_model.vectors:
+            mins = np.min(embedding_model.vectors, axis=0)
+            maxs = np.max(embedding_model.vectors, axis=0)
+            unk = (maxs - mins) * np.random.rand(embedding_dimension) + mins
         assert unk not in embedding_model.vectors, f"{unk_token} value already present"
         embedding_model.add(unk_token, unk)
 
@@ -101,6 +113,9 @@ def save_answers(path, answers):
 
 
 def get_device():
+    """
+    Return a CUDA device, if available, or a standard CPU device otherwise
+    """
     return torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
@@ -111,6 +126,9 @@ def get_default_trainer_args(
     label_names=["answers"],
     seed=1,
 ):
+    """
+    Return default parameters for the SQUaD trainer
+    """
     return partial(
         transformers.TrainingArguments,
         logging_dir="./runs",

@@ -74,14 +74,20 @@ class SquadDataset:
 
         # Check if the dataset has labels or not
         json_file = json.loads(open(dataset_path).read())
-        try:
-            pd.json_normalize(json_file, self.JSON_RECORD_PATH)
+        if (
+            len(
+                pd.json_normalize(json_file, self.JSON_RECORD_PATH[:-1]).loc[
+                    0, "answers"
+                ]
+            )
+            > 0
+        ):
             df = self._load_dataset_with_labels(json_file)
-        except KeyError:
+        else:
             df = self._load_dataset_no_labels(json_file)
 
-        # Remove duplicated rows
-        df = df.drop_duplicates().reset_index(drop=True)
+        # Reset the index to [0, N]
+        df = df.reset_index(drop=True)
 
         # Save the dataframe to a pickle file
         df.to_pickle(dataframe_path)
@@ -120,6 +126,9 @@ class SquadDataset:
 
         # Add end index for answers
         df = self._add_end_index(df)
+        
+        # Remove duplicated answers
+        df = df.drop_duplicates()
 
         return df
 
@@ -145,6 +154,9 @@ class SquadDataset:
         df_questions.rename(
             columns={"data.title": "title", "id": "question_id"}, inplace=True
         )
+        
+        if "answers" in df_questions.columns:
+            df_questions = df_questions.drop("answers", axis="columns")
 
         return df_questions
 
