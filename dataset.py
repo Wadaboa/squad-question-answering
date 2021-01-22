@@ -126,7 +126,7 @@ class SquadDataset:
 
         # Add end index for answers
         df = self._add_end_index(df)
-        
+
         # Remove duplicated answers
         df = df.drop_duplicates()
 
@@ -154,7 +154,7 @@ class SquadDataset:
         df_questions.rename(
             columns={"data.title": "title", "id": "question_id"}, inplace=True
         )
-        
+
         if "answers" in df_questions.columns:
             df_questions = df_questions.drop("answers", axis="columns")
 
@@ -187,24 +187,16 @@ class SquadDataManager:
         # Preprocess DataFrames and perform train/val split
         self.train_dataset, self.val_dataset, self.test_dataset = None, None, None
         if self.dataset.raw_train_df is not None:
-            self.train_df, self.val_df = self._train_val_split(
-                self.preprocess(self.dataset.raw_train_df.copy()), self.val_split
-            )
+            train_df = self.dataset.raw_train_df.copy()
+            train_df = self._remove_lost_answers(train_df)
+            train_df = self._group_answers(train_df)
+            self.train_df, self.val_df = self._train_val_split(train_df, self.val_split)
             self.train_dataset = SquadTorchDataset(self.train_df)
             self.val_dataset = SquadTorchDataset(self.val_df)
         if self.dataset.raw_test_df is not None:
-            self.test_df = self.dataset.raw_test_df.copy()
-            if self.dataset.test_has_labels:
-                self.test_df = self.preprocess(self.test_df)
+            test_df = self.dataset.raw_test_df.copy()
+            self.test_df = self._group_answers(test_df)
             self.test_dataset = SquadTorchDataset(self.test_df)
-
-    def preprocess(self, df):
-        """
-        Performs all the preprocessing steps with the given DataFrame
-        """
-        df = self._remove_lost_answers(df)
-        df = self._group_answers(df)
-        return df
 
     def _remove_lost_answers(self, df):
         """

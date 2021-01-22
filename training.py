@@ -26,8 +26,9 @@ class SquadTrainer(transformers.Trainer):
     def __init__(self, *args, **kwargs):
         kwargs["compute_metrics"] = self.compute_metrics
         super(SquadTrainer, self).__init__(*args, **kwargs)
+        self.wandb_callback = CustomWandbCallback()
         self.remove_callback(WandbCallback)
-        self.add_callback(CustomWandbCallback)
+        self.add_callback(self.wandb_callback)
 
     def compute_loss(self, model, inputs):
         """
@@ -53,12 +54,13 @@ class SquadTrainer(transformers.Trainer):
 
             # Compute and log metrics only if labels are available
             if labels is not None:
-                metrics = self.compute_metrics(
+                metrics = self.compute_scores(
                     EvalPrediction(
-                        predictions=outputs["token_outputs"], label_ids=labels
+                        predictions=(outputs["word_outputs"], outputs["indexes"]),
+                        label_ids=labels,
                     )
                 )
-                self.log(metrics)
+                self.wandb_callback.update_metrics(metrics)
 
         # Save past state if it exists
         # TODO: this needs to be fixed and made cleaner later.
@@ -67,42 +69,88 @@ class SquadTrainer(transformers.Trainer):
         # We don't use .loss here since the model may return tuples instead of ModelOutput.
         return outputs["loss"] if isinstance(outputs, dict) else outputs[0]
 
+    def compute_scores(self, eval_prediction):
+        # Predictions should be a tuple containing
+        # (word_outputs, indexes)
+        preds = eval_prediction.predictions
+        assert isinstance(preds, tuple)
+        word_outputs, indexes = preds
+
+        if self.args.do_predict:
+            df = self.test_dataset.df
+        elif self.model.training:
+            df = self.train_dataset.df
+        else:
+            df = self.eval_dataset.df
+
+        start = df["answer_start"].iloc[indexes].tolist()
+        end = df["answer_end"].iloc[indexes].tolist()
+        labels = torch.nn.utils.rnn.pad_sequence(
+            [torch.tensor(list(zip(t[0], t[1]))) for t in zip(start, end)],
+            batch_first=True,
+            padding_value=-100,
+        )
+        labels = utils.get_nearest_answers(labels, word_outputs, device="cpu")
+
+        preds_dict = utils.from_words_to_text(
+            df, word_outputs.tolist(), indexes.tolist(),
+        )
+        labels_dict = utils.from_words_to_text(df, labels.tolist(), indexes.tolist())
+        return self.get_raw_scores(preds_dict, labels_dict)
+
     def compute_metrics(self, eval_prediction):
         """
         Custom function that computes task-specific
         training and evaluation metrics
         """
-        # Labels are stored as a single tensor
-        # (concatenation of answer start and answer end)
-        labels = eval_prediction.label_ids
-        preds = eval_prediction.predictions
-        if isinstance(preds, tuple):
-            preds = preds[0]
-        labels = utils.get_nearest_answers(labels, preds, device=self.args.device)
+        scores = self.compute_scores(eval_prediction)
+        return {k: np.mean(v) for k, v in scores.items()}
 
-        # Ensure to work with numpy arrays
-        if isinstance(labels, torch.Tensor):
-            labels = labels.cpu().numpy()
-        if isinstance(preds, torch.Tensor):
-            preds = preds.cpu().numpy()
-        f_labels, f_preds = labels.flatten(), preds.flatten()
-
-        # Return a dictionary of metrics, as required by the Trainer
-        return {
-            "f1": sklearn.metrics.f1_score(f_labels, f_preds, average="macro"),
-            "accuracy": sklearn.metrics.accuracy_score(f_labels, f_preds),
-            "em": self.exact_match(labels, preds),
-        }
-
-    def exact_match(self, labels, preds):
+    def exact_match(self, label, pred):
         """
         Compute the EM score of the SQuAD competition,
         measuring the number of exactly matched answers
         """
-        assert labels.shape == preds.shape
-        total = labels.shape[0]
-        matches = np.count_nonzero((labels == preds).all(axis=1))
-        return matches / total
+        return float(label == pred)
+
+    def accuracy_precision_recall(self, label, pred):
+        label_tokens = label.split()
+        pred_tokens = pred.split()
+        common = collections.Counter(label_tokens) & collections.Counter(pred_tokens)
+        num_same = float(sum(common.values()))
+
+        # If either is no-answer, then 1 if they agree, 0 otherwise
+        if len(label_tokens) == 0 or len(pred_tokens) == 0:
+            res = float(label_tokens == pred_tokens)
+            return res, res, res
+        if num_same == 0:
+            return 0.0, 0.0, 0.0
+
+        num_preds, num_labels = len(pred_tokens), len(label_tokens)
+        accuracy = num_same / (num_preds + num_labels - num_same)
+        precision = num_same / num_preds
+        recall = num_same / num_labels
+        return accuracy, precision, recall
+
+    def f1_score(self, precision, recall):
+        if precision + recall == 0:
+            return 0
+        return (2 * precision * recall) / (precision + recall)
+
+    def get_raw_scores(self, preds_dict, labels_dict):
+        scores = collections.defaultdict(list)
+        for question_id in labels_dict.keys():
+            pred = preds_dict[question_id]
+            label = labels_dict[question_id]
+            accuracy, precision, recall = self.accuracy_precision_recall(label, pred)
+            f1 = self.f1_score(precision, recall)
+            em = self.exact_match(label, pred)
+            scores["accuracy"].append(accuracy)
+            scores["precision"].append(precision)
+            scores["recall"].append(recall)
+            scores["f1"].append(f1)
+            scores["em"].append(em)
+        return scores
 
     def predict(self, test_dataset, ignore_keys=None, metric_key_prefix="test"):
         """
@@ -115,21 +163,23 @@ class SquadTrainer(transformers.Trainer):
 
         # Test the model with the given dataloader and gather outputs
         test_dataloader = self.get_test_dataloader(test_dataset)
+        self.test_dataset = test_dataset
+        self.args.do_predict = True
         start_time = time.time()
         output = self.prediction_loop(
-            test_dataloader,
+            self.test_dataloader,
             description="Test",
             ignore_keys=ignore_keys,
             metric_key_prefix=metric_key_prefix,
         )
+        self.args.do_predict = False
 
         # Compute answers (taking spans from original contexts)
-        answers_dict = dict()
-        for span, index in zip(
-            output.predictions[1].tolist(), output.predictions[2].tolist()
-        ):
-            answer = test_dataset.df.loc[index, "context"][span[0] : span[1] + 1]
-            answers_dict[test_dataset.df.loc[index, "question_id"]] = answer.strip()
+        answers_dict = utils.from_words_to_text(
+            test_dataset.df,
+            output.predictions[1].tolist(),
+            output.predictions[2].tolist(),
+        )
 
         # Update metrics and patch the predictions attribute
         # with the computed answers
@@ -145,6 +195,7 @@ class SquadTrainer(transformers.Trainer):
 
 class CustomWandbCallback(WandbCallback):
     def __init__(self):
+        self.metrics = collections.defaultdict(list)
         super().__init__()
 
     def setup(self, args, state, model, reinit, **kwargs):
@@ -183,13 +234,24 @@ class CustomWandbCallback(WandbCallback):
                     log_freq=max(100, args.logging_steps),
                 )
 
-            # log outputs
+            # Log outputs
             self._log_model = os.getenv(
                 "WANDB_LOG_MODEL", "FALSE"
             ).upper() in ENV_VARS_TRUE_VALUES.union({"TRUE"})
 
+    def update_metrics(self, metrics):
+        for k, v in metrics.items():
+            self.metrics[k].extend(v)
+
     def on_epoch_begin(self, args, state, control, **kwargs):
+        self.metrics = collections.defaultdict(list)
         self._save_checkpoint(args.output_dir, state.global_step)
+
+    def on_epoch_end(self, args, state, control, **kwargs):
+        logs = {k: np.mean(v) for k, v in self.metrics.items()}
+        if state.epoch is not None:
+            logs["epoch"] = round(state.epoch, 2)
+        self.on_log(args, state, control, logs=logs, **kwargs)
 
     def on_train_end(self, args, state, control, **kwargs):
         self._save_checkpoint(args.output_dir, state.global_step)

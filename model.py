@@ -9,15 +9,14 @@ from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_se
 
 import utils
 
+
 def get_embedding_module(embedding_model, pad_id):
     embedding_layer = nn.Embedding(
         embedding_model.vectors.shape[0],
         embedding_model.vectors.shape[1],
         padding_idx=pad_id,
     )
-    embedding_layer.weight = nn.Parameter(
-        torch.from_numpy(embedding_model.vectors)
-    )
+    embedding_layer.weight = nn.Parameter(torch.from_numpy(embedding_model.vectors))
     embedding_layer.weight.requires_grad = False
     return embedding_layer
 
@@ -130,18 +129,13 @@ class QAOutput(nn.Module):
             return OrderedDict(
                 {
                     "loss": loss,
-                    "token_outputs": outputs,
                     "word_outputs": word_outputs,
                     "indexes": inputs["indexes"],
                 }
             )
 
         return OrderedDict(
-            {
-                "token_outputs": outputs,
-                "word_outputs": word_outputs,
-                "indexes": inputs["indexes"],
-            }
+            {"word_outputs": word_outputs, "indexes": inputs["indexes"],}
         )
 
 

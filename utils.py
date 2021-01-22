@@ -1,6 +1,8 @@
 import datetime
 import json
 import os
+import re
+import string
 from functools import partial
 
 import numpy as np
@@ -11,7 +13,7 @@ import gensim.downloader as gloader
 from IPython.display import display, HTML
 
 
-def get_nearest_answers(labels, preds, eps=1e-3, device="cpu"):
+def get_nearest_answers(labels, preds, device="cpu"):
     """
     Given ground truths and predictions, return
     the nearest ground truth for each prediction
@@ -34,13 +36,12 @@ def get_nearest_answers(labels, preds, eps=1e-3, device="cpu"):
         np.inf, device=device
     )
 
-    # Dirty hack to select only one label, if two or more of them are
-    # at the same distance with the corresponding prediction
-    summed_distances += torch.rand(summed_distances.shape, device=device) * eps
-
     # Consider the closest labels to the given predictions
-    min_values, _ = torch.min(summed_distances, dim=1, keepdims=True)
-    mask = (summed_distances == min_values).repeat(1, 1, 2)
+    _, min_indexes = torch.min(summed_distances, dim=1, keepdims=True)
+    mask = torch.zeros_like(summed_distances, device=device).bool()
+    mask = mask.scatter(
+        1, min_indexes, torch.ones_like(min_indexes, device=device).bool()
+    ).repeat(1, 1, 2)
     return labels[mask].reshape(preds.shape)
 
 
@@ -142,3 +143,36 @@ def get_default_trainer_args(
         label_names=["answers"],
         seed=seed,
     )
+
+
+def normalize_answer(s):
+    """
+    Lower text and remove punctuation, articles and extra whitespace
+    """
+
+    def remove_articles(text):
+        regex = re.compile(r"\b(a|an|the)\b", re.UNICODE)
+        return re.sub(regex, " ", text)
+
+    def white_space_fix(text):
+        return " ".join(text.split())
+
+    def remove_punc(text):
+        exclude = set(string.punctuation)
+        return "".join(ch for ch in text if ch not in exclude)
+
+    def lower(text):
+        return text.lower()
+
+    return white_space_fix(remove_articles(remove_punc(lower(s))))
+
+
+def from_words_to_text(df, spans, indexes):
+    """
+    Compute answers (taking spans from original contexts)
+    """
+    answers_dict = dict()
+    for span, index in zip(spans, indexes):
+        answer = df.loc[index, "context"][span[0] : span[1] + 1]
+        answers_dict[df.loc[index, "question_id"]] = normalize_answer(answer)
+    return answers_dict
