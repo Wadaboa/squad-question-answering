@@ -1,0 +1,151 @@
+\documentclass[a4paper,10pt]{report}
+\usepackage[T1]{fontenc}
+\usepackage[table]{xcolor}
+\usepackage{titlesec}
+\usepackage{graphicx}
+\usepackage[inkscapepath=../assets/svg]{svg}
+\usepackage{amsmath}
+\usepackage{amsthm}
+\usepackage{mathtools}
+\usepackage{fancyvrb}
+\usepackage[english]{babel}
+\usepackage{csquotes}
+\usepackage{hyperref}
+\hypersetup{
+   colorlinks=true,
+   linkcolor=blue,
+   urlcolor=cyan
+}
+\usepackage{tikz}
+\usepackage{amssymb}
+\usepackage[sc]{mathpazo}
+\linespread{1.05}
+\usepackage{microtype}
+\usepackage{breqn}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{minted}
+\setminted{
+   numberblanklines=false,
+   mathescape,
+   texcomments,
+   autogobble,
+   breakanywhere,
+   breakautoindent,
+   breaklines,
+   frame=none
+}
+\setminted[python]{python3}
+\usepackage[
+   backend=biber,%
+   bibencoding=utf8,%
+   language=english,%
+   style=numeric-comp,%
+   sorting=nyt,%
+   maxbibnames=10,%
+   natbib=true%
+]{biblatex}
+\addbibresource{references.bib}
+\usepackage{siunitx}
+\usepackage{booktabs}
+\usepackage{longtable}
+\graphicspath{ {../assets/img/} }
+
+% Set TOC depth and sections numbering
+\setcounter{tocdepth}{3}
+\setcounter{secnumdepth}{3}
+
+% Remove chapters head and reduce spacing
+\titleformat{\chapter}[hang]{\Large\bfseries}{\thechapter \hspace{2ex}}{0pt}{\Large}
+\titlespacing{\chapter}{0cm}{0cm}{0.5cm}
+\usepackage[parfill]{parskip}
+
+% Make quotes italic
+\renewcommand{\mkbegdispquote}[2]{\itshape}
+
+% Change texttt line breaks
+\renewcommand{\texttt}[1]{%
+  \begingroup
+  \ttfamily
+  \begingroup\lccode`~=`.\lowercase{\endgroup\def~}{.\discretionary{}{}{}}%
+  \catcode`/=\active\catcode`[=\active\catcode`.=\active
+  \scantokens{#1\noexpand}%
+  \endgroup
+}
+
+
+\begin{document}
+\frenchspacing
+
+% First page
+\title{
+	{{\large{\textsc{Alma Mater Studiorum $\cdot$ University of Bologna}}}}
+	\rule{\textwidth}{0.4pt}\vspace{3mm}
+	\textbf{Question answering on the SQuAD dataset}
+	\begin{figure}[!htb]
+		\centering
+		\includegraphics[width = 100pt]{squad-logo}
+	\end{figure} \\
+	NLP course final project
+}
+
+\author{Leonardo Calbi (\href{mailto:leonardo.calbi@studio.unibo.it}{leonardo.calbi@studio.unibo.it}) \\ Lorenzo Cellini (\href{mailto:lorenzo.cellini3@studio.unibo.it}{lorenzo.cellini3@studio.unibo.it}) \\ Alessio Falai (\href{mailto:alessio.falai@studio.unibo.it}{alessio.falai@studio.unibo.it})}
+\date{\today}
+\maketitle
+\newpage
+\tableofcontents
+\setcounter{tocdepth}{1}
+%\listoffigures
+%\listoftables
+\newpage
+
+
+\chapter{Summary}\label{chap:introduction}
+
+The tasks of machine comprehension (MC) and question answering (QA) have gained significant popularity over the past few years within the natural language processing and computer vision communities. Systems trained end-to-end now achieve great results on a variety of tasks in the text and image domains.
+
+In this work we address a question answering problem and, in particular, the Stanford Question Answer Dataset (SQuAD) problem: given a large collection of Wikipedia articles with associated questions, the goal is to identify the span of characters that contains the answer to the question.
+
+This project focuses on the SQuAD v1.1 dataset, that contains more than 100,000 question-answer pairs on more than 500 articles. Here each question has at least one associated answer, whereas in the SQuAD v2.0 dataset there are also questions with no answers at all.
+
+In this work we implement and compare three different models: a naïve LSTM encoder-decoder that will act as our baseline, the Bi-Directional Attention Flow (BIDAF) network (CITAZIONE) and a model that wraps a pretrained Bidirectional Encoder Representations from Transformers (BERT), as language model, coupled with a custom output layer on top of it.
+
+Our experimental evaluations show that our models achieve …………………………………………….
+
+\chapter{Background}\label{chap:background}
+
+Descriviamo la teoria dietro embedding, LSTM, attention, transformer, BERT e BIDAF?
+
+\chapter{System description}\label{chap:system-description}
+
+In this work we implement three distinct models: a naïve LSTM encoder-decoder that will act as our baseline, the Bi-Directional Attention Flow (BIDAF) network (CITAZIONE) and a model that wraps a pretrained Bidirectional Encoder Representations from Transformers (BERT), as language model, coupled with a custom output layer on top of it.
+
+Each model is trained on the SQuAD v1.1 training set and evaluated on the SQuAD v1.1 dev set, available on the github repository of the SQuAD project (link).
+
+The models’ evaluation is carried out on the same preprocessed data: indeed, we defined a preprocessing pipeline, applied it to the training and dev set once and the resulting dataset is fed to each model. (CONTROLLARE QUI – mi pare che per bert abbiamo tokenizzato diversamente)
+
+In order to perform an effective models’ comparison, each model shares the same input and output layer: what changes is the language model (embedding + attention layers) and the modelling layer.
+
+The following is a detailed description of the models.
+
+\section{Baseline}\label{sec:baseline}
+
+….
+
+\section{BiDAF}\label{sec:bidaf}
+
+Sintesi tra paper bidaf e medium
+
+\section{BERT}\label{sec:bert}
+
+….
+
+\chapter{Experimental setup and results}\label{chap:experiments}
+
+\chapter{Analysis of results}\label{chap:analysis-results}
+
+\chapter{Discussion}\label{chap:discussion}
+
+\printbibliography
+
+\end{document}
