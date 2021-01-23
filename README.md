@@ -4,12 +4,12 @@
   <img src="assets/img/squad-logo.jpg" alt="SQuAD logo"/>
 </p>
 
-This repository contains solutions to the question answering problem on the [SQuAD](https://rajpurkar.github.io/SQuAD-explorer/) v1.1 dataset, which consists on selecting a possible answer to the given question as a span of words in the given context paragraph. The newest version (v2.0) of the dataset also contains unansweable questions, but the one on which we worked on (v1.1) does not.
+This repository contains solutions to the question answering problem on the [SQuAD](https://rajpurkar.github.io/SQuAD-explorer/) v1.1 dataset, which consists on selecting a possible answer to the given question as a span of words in the given context paragraph. The newest version (v2.0) of the dataset also contains unanswerable questions, but the one on which we worked on (v1.1) does not.
 
 ## Installation
 
 In order to install all the dependencies required by the project, you have two options:
-1. Using `pip`: make sure that you `Python 3.8` installed on your system and run
+1. Using `pip`: make sure that you have `Python 3.8` installed on your system and run
 
 ```bash
 python3 -m venv squad
