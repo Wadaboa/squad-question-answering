@@ -296,7 +296,6 @@ def get_standard_tokenizer(
         pad_id=vocab[pad_token],
         pad_type_id=1,
         pad_token=pad_token,
-        length=max_context_tokens,
     )
     standard_context_tokenizer.enable_truncation(max_context_tokens)
 

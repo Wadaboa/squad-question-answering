@@ -11,6 +11,10 @@ import utils
 
 
 def get_embedding_module(embedding_model, pad_id):
+    """
+    Given a Gensim embedding model, load the weight matrix
+    into a PyTorch Embedding module and set it as non-trainable
+    """
     embedding_layer = nn.Embedding(
         embedding_model.vectors.shape[0],
         embedding_model.vectors.shape[1],
@@ -21,7 +25,24 @@ def get_embedding_module(embedding_model, pad_id):
     return embedding_layer
 
 
+def masked_softmax(x, dim, mask=None, log=False, eps=1e-4, device="cpu"):
+    """
+    Functional version of a softmax with masked inputs
+    """
+    if mask is None:
+        mask = torch.ones_like(x, device=device)
+    exp = torch.exp(x) * torch.where(
+        mask, mask.float(), torch.tensor(eps, dtype=torch.float32, device=device),
+    )
+    softmax = exp / exp.sum(dim=dim).unsqueeze(-1)
+    return softmax if not log else torch.log(softmax)
+
+
 class MaskedSoftmax(nn.Module):
+    """
+    Modular version of a softmax with masked inputs
+    """
+
     def __init__(self, dim, log=False, eps=1e-4, device="cpu"):
         super().__init__()
         self.dim = dim
@@ -33,15 +54,44 @@ class MaskedSoftmax(nn.Module):
         """
         Performs masked softmax
         """
-        if mask is None:
-            mask = torch.ones_like(x, device=self.device)
-        exp = torch.exp(x) * torch.where(
-            mask,
-            mask.float(),
-            torch.tensor(self.eps, dtype=torch.float32, device=self.device),
+        return masked_softmax(
+            x, self.dim, mask=mask, log=self.log, eps=self.eps, device=self.device
         )
-        softmax = exp / exp.sum(dim=self.dim).unsqueeze(-1)
-        return softmax if not self.log else torch.log(softmax)
+
+
+class LSTM(nn.Module):
+    def __init__(
+        self,
+        input_size,
+        hidden_size,
+        num_layers=1,
+        bias=True,
+        batch_first=False,
+        dropout=0.0,
+        bidirectional=False,
+    ):
+        super().__init__()
+        self.lstm = nn.LSTM(
+            input_size,
+            hidden_size,
+            num_layers=num_layers,
+            bias=bias,
+            batch_first=batch_first,
+            dropout=dropout,
+            bidirectional=bidirectional,
+        )
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x, lenghts):
+        packed_inputs = pack_padded_sequence(
+            x, lenghts.cpu(), batch_first=self.lstm.batch_first, enforce_sorted=False
+        )
+        output, (hidden, cell) = self.lstm(packed_inputs)
+        padded_outputs, padded_output_lenghts = pad_packed_sequence(
+            output, batch_first=self.lstm.batch_first
+        )
+        padded_outputs = self.dropout(padded_outputs)
+        return padded_outputs, padded_output_lenghts
 
 
 class QAOutput(nn.Module):
@@ -161,7 +211,7 @@ class QABaselineModel(nn.Module):
         self.embedding_dimension = embedding_module.weight.shape[-1]
 
         # Strategy to perform sentence embedding
-        self.recurrent_module = nn.LSTM(
+        self.recurrent_module = LSTM(
             self.embedding_dimension,
             self.embedding_dimension,
             batch_first=True,
@@ -196,19 +246,11 @@ class QABaselineModel(nn.Module):
         Use an RNN to encode tokens and extract information from the RNN states:
         average all the output layers
         """
-        packed_questions = pack_padded_sequence(
-            questions, question_lenghts.cpu(), batch_first=True, enforce_sorted=False
+        padded_questions, padded_questions_lenghts = self.recurrent_module(
+            questions, question_lenghts
         )
-        packed_contexts = pack_padded_sequence(
-            contexts, context_lenghts.cpu(), batch_first=True, enforce_sorted=False,
-        )
-        output_questions, (hidden, cell) = self.recurrent_module(packed_questions)
-        output_contexts, (hidden, cell) = self.recurrent_module(packed_contexts)
-        padded_questions, padded_questions_lenghts = pad_packed_sequence(
-            output_questions, batch_first=True
-        )
-        padded_contexts, padded_contexts_lenghts = pad_packed_sequence(
-            output_contexts, batch_first=True
+        padded_contexts, padded_contexts_lenghts = self.recurrent_module(
+            contexts, context_lenghts
         )
         return (
             padded_questions.sum(dim=1)
@@ -318,27 +360,34 @@ class AttentionFlow(nn.Module):
         ), f"Wrong similarity matrix input shape {input_sim.shape}"
         return input_sim
 
-    def context_to_query(self, sim, questions):
-        return torch.bmm(F.softmax(sim, dim=2), questions)
+    def context_to_query(self, sim, questions, questions_mask):
+        return torch.bmm(
+            masked_softmax(
+                sim, 2, mask=questions_mask.unsqueeze(1), device=self.device
+            ),
+            questions,
+        )
 
-    def query_to_context(self, sim, contexts):
+    def query_to_context(self, sim, contexts, contexts_mask):
         sim_max_col = sim.max(dim=2, keepdims=True)
-        attention_weights = F.softmax(sim_max_col.values, dim=1)
+        attention_weights = masked_softmax(
+            sim_max_col.values, 1, mask=contexts_mask.unsqueeze(-1), device=self.device
+        )
         return torch.bmm(attention_weights.transpose(1, 2), contexts).repeat(
             1, contexts.shape[1], 1
         )
 
-    def forward(self, questions, contexts):
+    def forward(self, questions, contexts, questions_mask, contexts_mask):
         input_sim = self.get_similarity_input(questions, contexts)
 
         # S
         sim = self.similarity(input_sim).squeeze(-1)
 
         # U tilde
-        u_tilde = self.context_to_query(sim, questions)
+        u_tilde = self.context_to_query(sim, questions, questions_mask)
 
         # H tilde
-        h_tilde = self.query_to_context(sim, contexts)
+        h_tilde = self.query_to_context(sim, contexts, contexts_mask)
 
         # Megamerge
         megamerge = torch.cat(
@@ -355,10 +404,9 @@ class QABiDAFModel(nn.Module):
     def __init__(
         self,
         embedding_module,
+        hidden_size=100,
         highway_depth=2,
         dropout_rate=0.2,
-        contextual_recurrent_layers=2,
-        contextual_bidirectional=False,
         device="cpu",
     ):
         """"""
@@ -367,34 +415,34 @@ class QABiDAFModel(nn.Module):
         # Embedding module
         self.word_embedding = embedding_module
         self.word_embedding_dimension = embedding_module.weight.shape[-1]
+        self.projection = nn.Linear(
+            self.word_embedding_dimension, hidden_size, bias=False
+        )
 
         # Highway network
         self.highway_depth = highway_depth
-        self.highway = get_highway(
-            self.highway_depth, self.word_embedding_dimension, device=device
-        )
+        self.highway = get_highway(self.highway_depth, hidden_size, device=device)
 
         # Dropout module
         self.dropout_rate = dropout_rate
         self.dropout = nn.Dropout(self.dropout_rate)
 
         # Contextual embeddings
-        self.contextual_embedding = nn.LSTM(
-            self.word_embedding_dimension,
-            self.word_embedding_dimension,
+        self.contextual_embedding = LSTM(
+            hidden_size,
+            hidden_size,
             batch_first=True,
-            num_layers=contextual_recurrent_layers,
-            bidirectional=contextual_bidirectional,
-            dropout=self.dropout_rate if contextual_recurrent_layers > 1 else 0.0,
+            num_layers=1,
+            bidirectional=True,
         )
 
         # Attention flow
-        self.attention = AttentionFlow(self.word_embedding_dimension, device=device)
+        self.attention = AttentionFlow(2 * hidden_size, device=device)
 
         # Modeling layer
-        self.modeling_layer = nn.LSTM(
-            4 * self.word_embedding_dimension,
-            self.word_embedding_dimension,
+        self.modeling_layer = LSTM(
+            8 * hidden_size,
+            hidden_size,
             batch_first=True,
             bidirectional=True,
             num_layers=2,
@@ -402,14 +450,11 @@ class QABiDAFModel(nn.Module):
         )
 
         # Output layer
-        self.out_lstm = nn.LSTM(
-            2 * self.word_embedding_dimension,
-            self.word_embedding_dimension,
-            batch_first=True,
-            bidirectional=True,
+        self.out_lstm = LSTM(
+            2 * hidden_size, hidden_size, batch_first=True, bidirectional=True,
         )
         self.output_layer = QAOutput(
-            6 * self.word_embedding_dimension,
+            10 * hidden_size,
             1,
             dropout_rate=self.dropout_rate,
             classifier_bias=False,
@@ -427,23 +472,34 @@ class QABiDAFModel(nn.Module):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
     def forward(self, **inputs):
-        embedded_questions = self.word_embedding(inputs["question_ids"].to(self.device))
-        embedded_contexts = self.word_embedding(inputs["context_ids"].to(self.device))
+        questions_mask = inputs["question_attention_mask"]
+        contexts_mask = inputs["context_attention_mask"]
+        questions_lenght = inputs["question_lenghts"]
+        contexts_lenght = inputs["context_lenghts"]
 
-        highway_questions = self.highway(embedded_questions)
-        highway_contexts = self.highway(embedded_contexts)
+        embedded_questions = self.dropout(self.word_embedding(inputs["question_ids"]))
+        embedded_contexts = self.dropout(self.word_embedding(inputs["context_ids"]))
 
-        contextual_questions = self.dropout(
-            self.contextual_embedding(highway_questions)[0]
+        hidden_questions = self.projection(embedded_questions)
+        hidden_contexts = self.projection(embedded_contexts)
+
+        highway_questions = self.highway(hidden_questions)
+        highway_contexts = self.highway(hidden_contexts)
+        
+        
+        contextual_questions, _ = self.contextual_embedding(
+            highway_questions, questions_lenght
         )
-        contextual_contexts = self.dropout(
-            self.contextual_embedding(highway_contexts)[0]
+        contextual_contexts, _ = self.contextual_embedding(
+            highway_contexts, contexts_lenght
         )
 
-        query_aware_contexts = self.attention(contextual_questions, contextual_contexts)
+        query_aware_contexts = self.attention(
+            contextual_questions, contextual_contexts, questions_mask, contexts_mask
+        )
 
-        modeling = self.dropout(self.modeling_layer(query_aware_contexts)[0])
-        m2 = self.dropout(self.out_lstm(modeling)[0])
+        modeling, _ = self.modeling_layer(query_aware_contexts, contexts_lenght)
+        m2, _ = self.out_lstm(modeling, contexts_lenght)
 
         return self.output_layer(
             torch.cat([query_aware_contexts, modeling], dim=-1),
