@@ -101,9 +101,12 @@ class QAOutput(nn.Module):
         output_size,
         dropout_rate=0.2,
         classifier_bias=True,
+        masked=True,
         device="cpu",
     ):
         super().__init__()
+
+        self.masked = masked
 
         self.start_classifier = nn.Linear(input_size, output_size, bias=classifier_bias)
         self.end_classifier = nn.Linear(input_size, output_size, bias=classifier_bias)
@@ -144,26 +147,16 @@ class QAOutput(nn.Module):
         return torch.cat([word_start_indexes, word_end_indexes], dim=1)
 
     def forward(self, start_input, end_input, **inputs):
+        start_indexes = self.start_classifier(start_input).squeeze(-1)
+        masked_start = inputs["context_attention_mask"] & inputs["subword_start_mask"]
+        start_probs = self.softmax(
+            self.dropout(start_indexes), masked_start if self.masked else None
+        )
+
         end_indexes = self.end_classifier(end_input).squeeze(-1)
         masked_end = inputs["subword_end_mask"] & inputs["context_attention_mask"]
-        end_probs = self.softmax(self.dropout(end_indexes), masked_end)
-
-        ########### inputs["context_attention_mask"] to start_probs or masked_start?
-        end_best_indexes = end_probs.argmax(dim=1, keepdims=True)
-        indexes = torch.stack(
-            end_probs.shape[0] * [torch.arange(end_probs.shape[1])]
-        ).to(self.device)
-        masked_start = (
-            (indexes <= end_best_indexes)
-            & inputs["context_attention_mask"]
-            & inputs["subword_start_mask"]
-        )
-        ############
-
-        start_indexes = self.start_classifier(start_input).squeeze(-1)
-        start_probs = self.softmax(
-            self.dropout(start_indexes),
-            masked_start,  # inputs["context_attention_mask"] ???
+        end_probs = self.softmax(
+            self.dropout(end_indexes), masked_end if self.masked else None
         )
 
         outputs = self.get_qa_outputs(start_probs, end_probs)
@@ -196,6 +189,7 @@ class QABaselineModel(nn.Module):
         self,
         embedding_module,
         max_context_tokens,
+        hidden_size=100,
         num_recurrent_layers=2,
         bidirectional=False,
         dropout_rate=0.2,
@@ -210,10 +204,12 @@ class QABaselineModel(nn.Module):
         self.embedding = embedding_module
         self.embedding_dimension = embedding_module.weight.shape[-1]
 
+        self.projection = nn.Linear(self.embedding_dimension, hidden_size)
+
         # Strategy to perform sentence embedding
         self.recurrent_module = LSTM(
-            self.embedding_dimension,
-            self.embedding_dimension,
+            hidden_size,
+            hidden_size,
             batch_first=True,
             num_layers=num_recurrent_layers,
             bidirectional=bidirectional,
@@ -221,12 +217,12 @@ class QABaselineModel(nn.Module):
         )
 
         # Output layer
+        out_dim = hidden_size if not bidirectional else 2 * hidden_size
+        self.out_lstm = LSTM(
+            out_dim, hidden_size, batch_first=True, bidirectional=bidirectional
+        )
         self.output_layer = QAOutput(
-            self.embedding_dimension * 2,
-            max_context_tokens,
-            dropout_rate=dropout_rate,
-            classifier_bias=True,
-            device=device,
+            out_dim, 1, dropout_rate=dropout_rate, classifier_bias=True, device=device,
         )
 
         # Transfer model to device
@@ -239,32 +235,6 @@ class QABaselineModel(nn.Module):
         """
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
-    def _sentence_embedding(
-        self, questions, contexts, question_lenghts, context_lenghts
-    ):
-        """
-        Use an RNN to encode tokens and extract information from the RNN states:
-        average all the output layers
-        """
-        padded_questions, padded_questions_lenghts = self.recurrent_module(
-            questions, question_lenghts
-        )
-        padded_contexts, padded_contexts_lenghts = self.recurrent_module(
-            contexts, context_lenghts
-        )
-        return (
-            padded_questions.sum(dim=1)
-            / padded_questions_lenghts.to(self.device).view(-1, 1),
-            padded_contexts.sum(dim=1)
-            / padded_contexts_lenghts.to(self.device).view(-1, 1),
-        )
-
-    def _merge_embeddings(self, questions, contexts):
-        """
-        Merge the given embeddings concatenating them
-        """
-        return torch.cat([questions, contexts], dim=1)
-
     def forward(self, **inputs):
         """
         Perform a forward pass and return predictions over
@@ -272,15 +242,26 @@ class QABaselineModel(nn.Module):
         """
         embedded_questions = self.embedding(inputs["question_ids"])
         embedded_contexts = self.embedding(inputs["context_ids"])
-        sentence_questions, sentence_contexts = self._sentence_embedding(
-            embedded_questions,
-            embedded_contexts,
-            inputs["question_lenghts"],
-            inputs["context_lenghts"],
-        )
-        merged_inputs = self._merge_embeddings(sentence_questions, sentence_contexts)
 
-        return self.output_layer(merged_inputs, merged_inputs, **inputs)
+        hidden_questions = self.projection(embedded_questions)
+        hidden_contexts = self.projection(embedded_contexts)
+
+        padded_questions, padded_questions_lenghts = self.recurrent_module(
+            hidden_questions, inputs["question_lenghts"]
+        )
+        padded_contexts, _ = self.recurrent_module(
+            hidden_contexts, inputs["context_lenghts"]
+        )
+
+        average_questions = padded_questions.sum(dim=1) / inputs[
+            "question_lenghts"
+        ].view(-1, 1)
+        start_input = padded_contexts * average_questions.unsqueeze(1).repeat(
+            1, padded_contexts.shape[1], 1
+        )
+        end_input, _ = self.out_lstm(start_input, inputs["context_lenghts"])
+
+        return self.output_layer(start_input, end_input, **inputs)
 
     def state_dict(self):
         st_dict = super().state_dict()
@@ -485,8 +466,7 @@ class QABiDAFModel(nn.Module):
 
         highway_questions = self.highway(hidden_questions)
         highway_contexts = self.highway(hidden_contexts)
-        
-        
+
         contextual_questions, _ = self.contextual_embedding(
             highway_questions, questions_lenght
         )
@@ -518,12 +498,23 @@ class QABiDAFModel(nn.Module):
 class QABertModel(nn.Module):
 
     IGNORE_LAYERS = "bert_model"
+    BERT_OUTPUT_SIZE = 768
 
     def __init__(self, dropout_rate=0.2, device="cpu"):
         super().__init__()
         self.bert_model = transformers.BertModel.from_pretrained("bert-base-uncased")
+        self.out_lstm = LSTM(
+            self.BERT_OUTPUT_SIZE,
+            self.BERT_OUTPUT_SIZE,
+            batch_first=True,
+            bidirectional=True,
+        )
         self.output_layer = QAOutput(
-            768, 1, dropout_rate=dropout_rate, classifier_bias=False, device=device
+            self.BERT_OUTPUT_SIZE,
+            1,
+            dropout_rate=dropout_rate,
+            classifier_bias=False,
+            device=device,
         )
 
         self.device = device
@@ -536,7 +527,8 @@ class QABertModel(nn.Module):
             "attention_mask": inputs["attention_mask"],
         }
         bert_outputs = self.bert_model(**bert_inputs)[0]
-        outputs = self.output_layer(bert_outputs, bert_outputs, **inputs)
+        end_input, _ = self.out_lstm(bert_outputs)
+        outputs = self.output_layer(bert_outputs, end_input, **inputs)
         return outputs
 
     def count_parameters(self):
