@@ -508,7 +508,6 @@ class QABiDAFModel(QAModel):
 
 class QABertModel(QAModel):
 
-    IGNORE_LAYERS = ["bert_model"]
     BERT_OUTPUT_SIZE = 768
     MODEL_TYPE = "bert-base-uncased"
 
@@ -519,7 +518,7 @@ class QABertModel(QAModel):
             self.BERT_OUTPUT_SIZE,
             self.BERT_OUTPUT_SIZE,
             batch_first=True,
-            bidirectional=True,
+            bidirectional=False,
         )
         self.output_layer = QAOutput(
             self.BERT_OUTPUT_SIZE,
@@ -545,14 +544,18 @@ class QABertModel(QAModel):
     def forward(self, **inputs):
         bert_inputs = self.get_model_inputs(**inputs)
         bert_outputs = self.bert_model(**bert_inputs)[0]
-        end_input, _ = self.out_lstm(bert_outputs)
+        end_input, _ = self.out_lstm(
+            bert_outputs,
+            torch.tensor(bert_outputs.shape[1], device=self.device).repeat(
+                bert_outputs.shape[0]
+            ),
+        )
         outputs = self.output_layer(bert_outputs, end_input, **inputs)
         return outputs
 
 
 class QADistilBertModel(QABertModel):
 
-    IGNORE_LAYERS = ["distilbert_model"]
     MODEL_TYPE = "distilbert-base-uncased"
 
     def __init__(self, dropout_rate=0.2, device="cpu"):
@@ -570,7 +573,6 @@ class QADistilBertModel(QABertModel):
 
 class QAElectraModel(QABertModel):
 
-    IGNORE_LAYERS = ["electra_model"]
     MODEL_TYPE = "google/electra-base-discriminator"
 
     def __init__(self, dropout_rate=0.2, device="cpu"):

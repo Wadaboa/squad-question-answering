@@ -79,6 +79,12 @@ class SquadTrainer(transformers.Trainer):
         preds = eval_prediction.predictions
         assert isinstance(preds, tuple)
         word_outputs, indexes = preds
+        
+        # Transfer to CPU
+        if isinstance(word_outputs, torch.Tensor):
+            word_outputs = word_outputs.cpu()
+        if isinstance(indexes, torch.Tensor):
+            indexes = indexes.cpu()
 
         if self.args.do_predict:
             df = self.test_dataset.df
