@@ -566,7 +566,7 @@ class QADistilBertModel(QABertModel):
 
     def get_model_inputs(self, **inputs):
         return {
-            "token_type_ids": inputs["context_type_ids"],
+            "input_ids": inputs["context_ids"],
             "attention_mask": inputs["attention_mask"],
         }
 
