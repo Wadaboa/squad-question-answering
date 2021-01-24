@@ -94,6 +94,43 @@ class LSTM(nn.Module):
         return padded_outputs, padded_output_lenghts
 
 
+class QAModel(nn.Module):
+    """
+    Abstract question answering module
+    """
+
+    IGNORE_LAYERS = []
+
+    def __init__(self):
+        super().__init__()
+
+    def count_parameters(self):
+        """
+        Return the total number of trainable parameters in the model
+        """
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+    def state_dict(self):
+        """
+        Override default state dict to ignore
+        saving pre-defined layers
+        """
+        st_dict = super().state_dict()
+        return {
+            k: st_dict[k]
+            for k in st_dict.keys()
+            for l in self.IGNORE_LAYERS
+            if not k.startswith(l)
+        }
+
+    def load_state_dict(self, state_dict, strict=False):
+        """
+        Override default state dict loading
+        to allow the non-strict way 
+        """
+        return super().load_state_dict(state_dict, strict=strict)
+
+
 class QAOutput(nn.Module):
     def __init__(
         self,
@@ -182,7 +219,7 @@ class QAOutput(nn.Module):
         )
 
 
-class QABaselineModel(nn.Module):
+class QABaselineModel(QAModel):
     IGNORE_LAYERS = ["embedding.weight"]
 
     def __init__(
@@ -229,12 +266,6 @@ class QABaselineModel(nn.Module):
         self.device = device
         self.to(self.device)
 
-    def count_parameters(self):
-        """
-        Return the total number of trainable parameters in the model
-        """
-        return sum(p.numel() for p in self.parameters() if p.requires_grad)
-
     def forward(self, **inputs):
         """
         Perform a forward pass and return predictions over
@@ -262,13 +293,6 @@ class QABaselineModel(nn.Module):
         end_input, _ = self.out_lstm(start_input, inputs["context_lenghts"])
 
         return self.output_layer(start_input, end_input, **inputs)
-
-    def state_dict(self):
-        st_dict = super().state_dict()
-        return {k: st_dict[k] for k in st_dict.keys() if k not in self.IGNORE_LAYERS}
-
-    def load_state_dict(self, state_dict, strict=False):
-        return super().load_state_dict(state_dict, strict=strict)
 
 
 class Highway(nn.Module):
@@ -379,7 +403,7 @@ class AttentionFlow(nn.Module):
         return g
 
 
-class QABiDAFModel(nn.Module):
+class QABiDAFModel(QAModel):
     IGNORE_LAYERS = ["word_embedding.weight"]
 
     def __init__(
@@ -446,12 +470,6 @@ class QABiDAFModel(nn.Module):
         self.device = device
         self.to(self.device)
 
-    def count_parameters(self):
-        """
-        Return the total number of trainable parameters in the model
-        """
-        return sum(p.numel() for p in self.parameters() if p.requires_grad)
-
     def forward(self, **inputs):
         questions_mask = inputs["question_attention_mask"]
         contexts_mask = inputs["context_attention_mask"]
@@ -487,22 +505,16 @@ class QABiDAFModel(nn.Module):
             **inputs,
         )
 
-    def state_dict(self):
-        st_dict = super().state_dict()
-        return {k: st_dict[k] for k in st_dict.keys() if k not in self.IGNORE_LAYERS}
 
-    def load_state_dict(self, state_dict, strict=False):
-        return super().load_state_dict(state_dict, strict=strict)
+class QABertModel(QAModel):
 
-
-class QABertModel(nn.Module):
-
-    IGNORE_LAYERS = "bert_model"
+    IGNORE_LAYERS = ["bert_model"]
     BERT_OUTPUT_SIZE = 768
+    MODEL_TYPE = "bert-base-uncased"
 
     def __init__(self, dropout_rate=0.2, device="cpu"):
         super().__init__()
-        self.bert_model = transformers.BertModel.from_pretrained("bert-base-uncased")
+        self.bert_model = self.get_model()
         self.out_lstm = LSTM(
             self.BERT_OUTPUT_SIZE,
             self.BERT_OUTPUT_SIZE,
@@ -520,30 +532,49 @@ class QABertModel(nn.Module):
         self.device = device
         self.to(self.device)
 
-    def forward(self, **inputs):
-        bert_inputs = {
+    def get_model(self):
+        transformers.BertModel.from_pretrained(self.MODEL_TYPE)
+
+    def get_model_inputs(self, **inputs):
+        return {
             "input_ids": inputs["context_ids"],
             "token_type_ids": inputs["context_type_ids"],
             "attention_mask": inputs["attention_mask"],
         }
+
+    def forward(self, **inputs):
+        bert_inputs = self.get_model_inputs(**inputs)
         bert_outputs = self.bert_model(**bert_inputs)[0]
         end_input, _ = self.out_lstm(bert_outputs)
         outputs = self.output_layer(bert_outputs, end_input, **inputs)
         return outputs
 
-    def count_parameters(self):
-        """
-        Return the total number of trainable parameters in the model
-        """
-        return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
-    def state_dict(self):
-        st_dict = super().state_dict()
+class QADistilBertModel(QABertModel):
+
+    IGNORE_LAYERS = ["distilbert_model"]
+    MODEL_TYPE = "distilbert-base-uncased"
+
+    def __init__(self, dropout_rate=0.2, device="cpu"):
+        super().__init__(dropout_rate=dropout_rate, device=device)
+
+    def get_model(self):
+        transformers.DistilBertModel.from_pretrained(self.MODEL_TYPE)
+
+    def get_model_inputs(self, **inputs):
         return {
-            k: st_dict[k]
-            for k in st_dict.keys()
-            if not k.startswith(self.IGNORE_LAYERS)
+            "token_type_ids": inputs["context_type_ids"],
+            "attention_mask": inputs["attention_mask"],
         }
 
-    def load_state_dict(self, state_dict, strict=False):
-        return super().load_state_dict(state_dict, strict=strict)
+
+class QAElectraModel(QABertModel):
+
+    IGNORE_LAYERS = ["electra_model"]
+    MODEL_TYPE = "google/electra-base-discriminator"
+
+    def __init__(self, dropout_rate=0.2, device="cpu"):
+        super().__init__(dropout_rate=dropout_rate, device=device)
+
+    def get_model(self):
+        transformers.ElectraModel.from_pretrained(self.MODEL_TYPE)
