@@ -125,6 +125,7 @@ def get_default_trainer_args(
     logging_steps=5,
     metric_for_best_model="f1",
     label_names=["answers"],
+    evaluation_strategy="epoch",
     seed=1,
 ):
     """

@@ -1,6 +1,7 @@
 import collections
 import time
 import os
+import importlib.util
 
 import numpy as np
 import sklearn
@@ -26,9 +27,11 @@ class SquadTrainer(transformers.Trainer):
     def __init__(self, *args, **kwargs):
         kwargs["compute_metrics"] = self.compute_metrics
         super(SquadTrainer, self).__init__(*args, **kwargs)
-        self.wandb_callback = CustomWandbCallback()
-        self.remove_callback(WandbCallback)
-        self.add_callback(self.wandb_callback)
+        self.wandb_callback = None
+        if is_wandb_available():
+            self.wandb_callback = CustomWandbCallback()
+            self.remove_callback(WandbCallback)
+            self.add_callback(self.wandb_callback)
 
     def compute_loss(self, model, inputs):
         """
@@ -60,7 +63,8 @@ class SquadTrainer(transformers.Trainer):
                         label_ids=labels,
                     )
                 )
-                self.wandb_callback.update_metrics(metrics)
+                if self.wandb_callback is not None:
+                    self.wandb_callback.update_metrics(metrics)
 
         # Save past state if it exists
         # TODO: this needs to be fixed and made cleaner later.
@@ -162,12 +166,11 @@ class SquadTrainer(transformers.Trainer):
             raise ValueError("test_dataset must implement __len__")
 
         # Test the model with the given dataloader and gather outputs
-        test_dataloader = self.get_test_dataloader(test_dataset)
         self.test_dataset = test_dataset
         self.args.do_predict = True
         start_time = time.time()
         output = self.prediction_loop(
-            self.test_dataloader,
+            self.get_test_dataloader(self.test_dataset),
             description="Test",
             ignore_keys=ignore_keys,
             metric_key_prefix=metric_key_prefix,
@@ -177,8 +180,8 @@ class SquadTrainer(transformers.Trainer):
         # Compute answers (taking spans from original contexts)
         answers_dict = utils.from_words_to_text(
             test_dataset.df,
-            output.predictions[1].tolist(),
-            output.predictions[2].tolist(),
+            output.predictions[-2].tolist(),
+            output.predictions[-1].tolist(),
         )
 
         # Update metrics and patch the predictions attribute
@@ -186,6 +189,8 @@ class SquadTrainer(transformers.Trainer):
         output.metrics.update(
             speed_metrics(metric_key_prefix, start_time, len(test_dataset))
         )
+        if self.wandb_callback is not None:
+            self.wandb_callback.save_notes(output.metrics)
         return PredictionOutput(
             predictions=output.predictions + (answers_dict,),
             label_ids=output.label_ids,
@@ -193,10 +198,16 @@ class SquadTrainer(transformers.Trainer):
         )
 
 
+def is_wandb_available():
+    if os.getenv("WANDB_DISABLED", "").upper() in ENV_VARS_TRUE_VALUES:
+        return False
+    return importlib.util.find_spec("wandb") is not None
+
+
 class CustomWandbCallback(WandbCallback):
     def __init__(self):
-        self.metrics = collections.defaultdict(list)
         super().__init__()
+        self.metrics = collections.defaultdict(list)
 
     def setup(self, args, state, model, reinit, **kwargs):
 
@@ -243,6 +254,11 @@ class CustomWandbCallback(WandbCallback):
         for k, v in metrics.items():
             self.metrics[k].extend(v)
 
+    def save_notes(self, notes):
+        if self._wandb is not None and self._wandb.run is not None:
+            self._wandb.run.notes = self._wandb.run.notes + "\n" + str(notes)
+            self._wandb.run.save()
+
     def on_epoch_begin(self, args, state, control, **kwargs):
         self.metrics = collections.defaultdict(list)
         self._save_checkpoint(args.output_dir, state.global_step)
@@ -252,6 +268,8 @@ class CustomWandbCallback(WandbCallback):
         if state.epoch is not None:
             logs["epoch"] = round(state.epoch, 2)
         self.on_log(args, state, control, logs=logs, **kwargs)
+        output = {**logs, **{"step": state.global_step}}
+        state.log_history.append(output)
 
     def on_train_end(self, args, state, control, **kwargs):
         self._save_checkpoint(args.output_dir, state.global_step)

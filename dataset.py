@@ -190,6 +190,7 @@ class SquadDataManager:
             train_df = self.dataset.raw_train_df.copy()
             train_df = self._remove_lost_answers(train_df)
             train_df = self._group_answers(train_df)
+            self.whole_dataset = SquadTorchDataset(train_df)
             self.train_df, self.val_df = self._train_val_split(train_df, self.val_split)
             self.train_dataset = SquadTorchDataset(self.train_df)
             self.val_dataset = SquadTorchDataset(self.val_df)
