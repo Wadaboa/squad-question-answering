@@ -533,7 +533,7 @@ class QABertModel(QAModel):
         self.to(self.device)
 
     def get_model(self):
-        transformers.BertModel.from_pretrained(self.MODEL_TYPE)
+        return transformers.BertModel.from_pretrained(self.MODEL_TYPE)
 
     def get_model_inputs(self, **inputs):
         return {
@@ -559,7 +559,7 @@ class QADistilBertModel(QABertModel):
         super().__init__(dropout_rate=dropout_rate, device=device)
 
     def get_model(self):
-        transformers.DistilBertModel.from_pretrained(self.MODEL_TYPE)
+        return transformers.DistilBertModel.from_pretrained(self.MODEL_TYPE)
 
     def get_model_inputs(self, **inputs):
         return {
@@ -577,4 +577,4 @@ class QAElectraModel(QABertModel):
         super().__init__(dropout_rate=dropout_rate, device=device)
 
     def get_model(self):
-        transformers.ElectraModel.from_pretrained(self.MODEL_TYPE)
+        return transformers.ElectraModel.from_pretrained(self.MODEL_TYPE)
