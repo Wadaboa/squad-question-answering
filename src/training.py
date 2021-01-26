@@ -4,7 +4,6 @@ import os
 import importlib.util
 
 import numpy as np
-import sklearn
 import torch
 import transformers
 from transformers.trainer_pt_utils import nested_detach
@@ -74,18 +73,22 @@ class SquadTrainer(transformers.Trainer):
         return outputs["loss"] if isinstance(outputs, dict) else outputs[0]
 
     def compute_scores(self, eval_prediction):
+        """
+        Given predictions, returns a dictionary of metrics
+        """
         # Predictions should be a tuple containing
         # (word_outputs, indexes)
         preds = eval_prediction.predictions
         assert isinstance(preds, tuple)
         word_outputs, indexes = preds
-        
+
         # Transfer to CPU
         if isinstance(word_outputs, torch.Tensor):
             word_outputs = word_outputs.cpu()
         if isinstance(indexes, torch.Tensor):
             indexes = indexes.cpu()
 
+        # Select the current dataset (train, eval or test)
         if self.args.do_predict:
             df = self.test_dataset.df
         elif self.model.training:
@@ -93,6 +96,7 @@ class SquadTrainer(transformers.Trainer):
         else:
             df = self.eval_dataset.df
 
+        # Get the nearest answers to the given predictions
         start = df["answer_start"].iloc[indexes].tolist()
         end = df["answer_end"].iloc[indexes].tolist()
         labels = torch.nn.utils.rnn.pad_sequence(
@@ -102,6 +106,8 @@ class SquadTrainer(transformers.Trainer):
         )
         labels = utils.get_nearest_answers(labels, word_outputs, device="cpu")
 
+        # Convert labels and predictions into textual format,
+        # for output and metrics purposes
         preds_dict = utils.from_words_to_text(
             df, word_outputs.tolist(), indexes.tolist(),
         )
@@ -124,6 +130,10 @@ class SquadTrainer(transformers.Trainer):
         return float(label == pred)
 
     def accuracy_precision_recall(self, label, pred):
+        """
+        Computes accuracy, precision and recall, as in
+        the official SQuAD evaluation script
+        """
         label_tokens = label.split()
         pred_tokens = pred.split()
         common = collections.Counter(label_tokens) & collections.Counter(pred_tokens)
@@ -143,11 +153,17 @@ class SquadTrainer(transformers.Trainer):
         return accuracy, precision, recall
 
     def f1_score(self, precision, recall):
+        """
+        Computes F1 score, given precision and recall values
+        """
         if precision + recall == 0:
             return 0
         return (2 * precision * recall) / (precision + recall)
 
     def get_raw_scores(self, preds_dict, labels_dict):
+        """
+        Returns question answering metrics
+        """
         scores = collections.defaultdict(list)
         for question_id in labels_dict.keys():
             pred = preds_dict[question_id]
@@ -195,8 +211,11 @@ class SquadTrainer(transformers.Trainer):
         output.metrics.update(
             speed_metrics(metric_key_prefix, start_time, len(test_dataset))
         )
+
+        # Log final metrics to wandb
         if self.wandb_callback is not None:
             self.wandb_callback.save_notes(output.metrics)
+
         return PredictionOutput(
             predictions=output.predictions + (answers_dict,),
             label_ids=output.label_ids,
@@ -205,27 +224,32 @@ class SquadTrainer(transformers.Trainer):
 
 
 def is_wandb_available():
+    """
+    Checks if wandb is available and enabled
+    """
     if os.getenv("WANDB_DISABLED", "").upper() in ENV_VARS_TRUE_VALUES:
         return False
     return importlib.util.find_spec("wandb") is not None
 
 
 class CustomWandbCallback(WandbCallback):
+    """
+    Custom wandb callback, to handle saving checkpoints,
+    grouping runs and inserting training metrics
+    """
+
     def __init__(self):
         super().__init__()
         self.metrics = collections.defaultdict(list)
 
     def setup(self, args, state, model, reinit, **kwargs):
-
         if self._wandb is None:
             return
+
         self._initialized = True
         if state.is_world_process_zero:
-            combined_dict = {**args.to_sanitized_dict()}
-
-            if hasattr(model, "config") and model.config is not None:
-                model_config = model.config.to_dict()
-                combined_dict = {**model_config, **combined_dict}
+            # Edit run name if doing
+            # hyperparameter search
             trial_name = state.trial_name
             init_args = {}
             if trial_name is not None:
@@ -234,6 +258,13 @@ class CustomWandbCallback(WandbCallback):
             else:
                 run_name = args.run_name
 
+            # Get current Trainer config
+            combined_dict = {**args.to_sanitized_dict()}
+            if hasattr(model, "config") and model.config is not None:
+                model_config = model.config.to_dict()
+                combined_dict = {**model_config, **combined_dict}
+
+            # Initialize the wandb run
             self._wandb.init(
                 project=os.getenv("WANDB_PROJECT", "squad-qa"),
                 group=os.getenv("WANDB_RUN_GROUP", None),
@@ -243,7 +274,7 @@ class CustomWandbCallback(WandbCallback):
                 **init_args,
             )
 
-            # keep track of model topology and gradients, unsupported on TPU
+            # Keep track of model topology and gradients (unsupported on TPU)
             if not is_torch_tpu_available() and os.getenv("WANDB_WATCH") != "false":
                 self._wandb.watch(
                     model,
@@ -257,19 +288,32 @@ class CustomWandbCallback(WandbCallback):
             ).upper() in ENV_VARS_TRUE_VALUES.union({"TRUE"})
 
     def update_metrics(self, metrics):
+        """
+        Update current metrics
+        """
         for k, v in metrics.items():
             self.metrics[k].extend(v)
 
     def save_notes(self, notes):
+        """
+        Save the given string in the notes section
+        of the current run
+        """
         if self._wandb is not None and self._wandb.run is not None:
             self._wandb.run.notes = self._wandb.run.notes + "\n" + str(notes)
             self._wandb.run.save()
 
     def on_epoch_begin(self, args, state, control, **kwargs):
+        """
+        Initialize metrics and save the first model checkpoint
+        """
         self.metrics = collections.defaultdict(list)
         self._save_checkpoint(args.output_dir, state.global_step)
 
     def on_epoch_end(self, args, state, control, **kwargs):
+        """
+        Log training metrics
+        """
         logs = {k: np.mean(v) for k, v in self.metrics.items()}
         if state.epoch is not None:
             logs["epoch"] = round(state.epoch, 2)
@@ -278,9 +322,16 @@ class CustomWandbCallback(WandbCallback):
         state.log_history.append(output)
 
     def on_train_end(self, args, state, control, **kwargs):
+        """
+        Save the final checkpoint
+        """
         self._save_checkpoint(args.output_dir, state.global_step)
 
     def _save_checkpoint(self, output_dir, step):
+        """
+        Save the current state of the model
+        in the output directory
+        """
         checkpoint_path = f"{output_dir}/checkpoint-{step}"
         if os.path.exists(checkpoint_path):
             self._wandb.save(f"{checkpoint_path}/*")

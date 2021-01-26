@@ -33,6 +33,10 @@ class SquadTokenizer:
         self.device = device
 
     def tokenize(self, inputs, entity=None, special=False):
+        """
+        Tokenize the given input, using the specified tokenizer
+        (optionally remove special tokens, like padding)
+        """
         tokenizer = self.select_tokenizer(entity)
         tokenizer_padding = tokenizer.padding
         if not special:
@@ -42,14 +46,25 @@ class SquadTokenizer:
         return outputs
 
     def detokenize(self, inputs, entity=None, special=True):
+        """
+        De-tokenize the given tokenized input, into
+        the original word sequence
+        """
         tokenizer = self.select_tokenizer(entity)
         return tokenizer.decode_batch(inputs, skip_special_tokens=not special)
 
     def get_pad_token_id(self):
+        """
+        Return the ID of the token used for padding
+        """
         tokenizer = self.select_tokenizer(entity="context")
         return tokenizer.padding["pad_id"]
 
     def find_tokenized_answer_indexes(self, offsets, starts, ends):
+        """
+        Given start and end word indices, return the corresponding
+        indices in the tokenized space
+        """
         batch_size = len(starts)
         max_answers = max([len(row) for row in starts])
         indexes = torch.full((batch_size, max_answers, 2), -100, device=self.device)
@@ -64,6 +79,12 @@ class SquadTokenizer:
         return indexes
 
     def find_subword_indexes(self, word_ids):
+        """
+        Given a list of word IDs, return two mask,
+        one indicating the start of words and one
+        indicating the end of words, which should 
+        be used to ignore subwords
+        """
         start_mask = torch.full(
             (len(word_ids), len(word_ids[0])), False, device=self.device
         )
@@ -87,16 +108,20 @@ class SquadTokenizer:
         return start_mask, end_mask
 
     def select_tokenizer(self, entity=None):
+        """
+        Given an entity (None, "context" or "question"),
+        return the corresponding tokenizer
+        """
         raise NotImplementedError()
 
     def __call__(self, inputs):
         raise NotImplementedError()
 
 
-class StandardSquadTokenizer(SquadTokenizer):
+class RecurrentSquadTokenizer(SquadTokenizer):
     """
     Tokenizer and data collator to be used with a 
-    RNN-based model, which uses two different tokenizers
+    recurrent-based model, which uses two different tokenizers
     (one for questions and one for contexts)
     """
 
@@ -108,6 +133,10 @@ class StandardSquadTokenizer(SquadTokenizer):
         self.context_tokenizer = context_tokenizer
 
     def select_tokenizer(self, entity=None):
+        """
+        Return the "question" or "context" tokenizer,
+        based on the given entity
+        """
         assert entity in ("question", "context")
         return (
             self.context_tokenizer if entity == "context" else self.question_tokenizer
@@ -203,6 +232,10 @@ class TransformerSquadTokenizer(SquadTokenizer):
         self.tokenizer = tokenizer
 
     def select_tokenizer(self, entity=None):
+        """
+        Ignore the entity parameter and always return
+        the same tokenizer
+        """
         return self.tokenizer
 
     def __call__(self, inputs):
@@ -265,6 +298,9 @@ class TransformerSquadTokenizer(SquadTokenizer):
 def get_transformer_tokenizer(
     vocab_path="data/bert-base-uncased-vocab.txt", max_tokens=512, device="cpu"
 ):
+    """
+    Return a tokenizer to be used with Transformer-based models
+    """
     wp_tokenizer = BertWordPieceTokenizer(vocab_path, lowercase=True)
     wp_tokenizer.enable_padding(direction="right", pad_type_id=1)
     wp_tokenizer.enable_truncation(max_tokens)
@@ -274,6 +310,9 @@ def get_transformer_tokenizer(
 def get_recurrent_tokenizer(
     vocab, max_context_tokens, unk_token="[UNK]", pad_token="[PAD]", device="cpu"
 ):
+    """
+    Return a tokenizer to be used with recurrent-based models
+    """
     question_tokenizer = Tokenizer(WordLevel(vocab, unk_token=unk_token))
     question_tokenizer.normalizer = Sequence([StripAccents(), Lowercase(), Strip()])
     question_tokenizer.pre_tokenizer = PreSequence([Whitespace(), Punctuation()])
@@ -289,4 +328,4 @@ def get_recurrent_tokenizer(
     )
     context_tokenizer.enable_truncation(max_context_tokens)
 
-    return StandardSquadTokenizer(question_tokenizer, context_tokenizer, device=device)
+    return RecurrentSquadTokenizer(question_tokenizer, context_tokenizer, device=device)

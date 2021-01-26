@@ -257,7 +257,11 @@ class QABertModel(QAModel):
 
     def __init__(self, dropout_rate=0.2, device="cpu"):
         super().__init__()
+
+        # BERT model
         self.bert_model = self.get_model()
+
+        # Output layer
         self.out_lstm = layer.LSTM(
             self.BERT_OUTPUT_SIZE,
             self.BERT_OUTPUT_SIZE,
@@ -272,6 +276,7 @@ class QABertModel(QAModel):
             device=device,
         )
 
+        # Transfer model to device
         self.device = device
         self.to(self.device)
 

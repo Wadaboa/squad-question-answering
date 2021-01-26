@@ -19,9 +19,11 @@ class SquadDataset:
     def __init__(
         self, train_set_path=None, test_set_path=None, subset=1.0,
     ):
+        # Save training and test set paths
         self.train_set_path = train_set_path
         self.test_set_path = test_set_path
 
+        # Process the training set
         self.raw_train_df = None
         if self.train_set_path is not None:
             assert os.path.exists(
@@ -34,6 +36,7 @@ class SquadDataset:
             if subset < 1.0:
                 self.raw_train_df = self._get_portion(self.raw_train_df, subset)
 
+        # Process the test set
         self.raw_test_df = None
         if self.test_set_path:
             assert os.path.exists(
@@ -184,8 +187,8 @@ class SquadDataManager:
         self.val_split = val_split
         self.device = device
 
-        # Preprocess DataFrames and perform train/val split
-        self.train_dataset, self.val_dataset, self.test_dataset = None, None, None
+        # Preprocess the raw train dataset and perform train/val split
+        self.train_dataset, self.val_dataset = None, None
         if self.dataset.raw_train_df is not None:
             train_df = self.dataset.raw_train_df.copy()
             train_df = self._remove_lost_answers(train_df)
@@ -194,6 +197,9 @@ class SquadDataManager:
             self.train_df, self.val_df = self._train_val_split(train_df, self.val_split)
             self.train_dataset = SquadTorchDataset(self.train_df)
             self.val_dataset = SquadTorchDataset(self.val_df)
+        
+        # Preprocess the raw test dataset
+        self.test_dataset = None
         if self.dataset.raw_test_df is not None:
             test_df = self.dataset.raw_test_df.copy()
             self.test_df = self._group_answers(test_df)
