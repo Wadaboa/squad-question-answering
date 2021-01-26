@@ -15,15 +15,22 @@ MODELS = {
     "baseline": model.QABaselineModel,
     "bidaf": model.QABiDAFModel,
     "bert": model.QABertModel,
+    "distilbert": model.QADistilBertModel,
+    "electra": model.QAElectraModel,
 }
 TOKENIZERS = {
-    "baseline": tokenizer.get_standard_tokenizer,
-    "bidaf": tokenizer.get_standard_tokenizer,
-    "bert": tokenizer.get_bert_tokenizer,
+    "baseline": tokenizer.get_recurrent_tokenizer,
+    "bidaf": tokenizer.get_recurrent_tokenizer,
+    "bert": tokenizer.get_transformer_tokenizer,
+    "distilbert": tokenizer.get_transformer_tokenizer,
+    "electra": tokenizer.get_transformer_tokenizer,
 }
 
 
 def main(args):
+    """
+    Predict answers to the given test questions
+    """
     squad_dataset = dataset.SquadDataset(test_set_path=args.path)
     squad_tokenizer = TOKENIZERS[args.model](device=args.device)
     data_manager = dataset.SquadDataManager(
@@ -49,6 +56,9 @@ def main(args):
 
 
 def parse_args():
+    """
+    Parse command-line arguments
+    """
     parser = argparse.ArgumentParser()
     parser.add_argument("path", help="path to the testing set .json file")
     parser.add_argument(
