@@ -37,7 +37,10 @@
 \usepackage{siunitx}
 \usepackage{booktabs}
 \usepackage{longtable}
+\usepackage{geometry}
 \graphicspath{ {../assets/img/} }
+
+\newgeometry{hmargin={30mm,30mm}}
 
 % Set TOC depth and sections numbering
 \setcounter{tocdepth}{3}
@@ -102,9 +105,37 @@ Our experimental evaluations show that our models achieve …………………�
 
 \chapter{Background}\label{chap:background}
 
-As already described above, the question answering task is based on the idea of identifying one possible answer to the given question as a subset of the given context. Since the input data is of textual form and the latest models for the task are all based on neural architectures, there is the need to encode such text into a numeric representation. As of today, there are two main approaches to embed words in numerical format: sparse embeddings, like TF-IDF \cite{tf-idf} and PPMI \cite{ppmi}, and the modern dense embeddings, such as Word2Vec \cite{word2vec} and GloVe \cite{glove}. In the latter case, the first step of the NLP pipeline is usually done with shallow encoders, that compute meaningful embeddings for each word in the input vocabulary. 
+As already described above, the question answering task is based on the idea of identifying one possible answer to the given question as a subset of the given context. 
 
-Descriviamo la teoria dietro embedding, LSTM, attention, transformer, BERT e BIDAF?
+Since the input data is of textual form and the latest models for the task are all based on neural architectures, there is the need to encode such text into a numeric representation. As of today, there are two main approaches to embed words in numerical format: sparse embeddings, like TF-IDF \cite{tf-idf} and PPMI \cite{ppmi}, and the modern dense embeddings, such as Word2Vec \cite{word2vec} and GloVe \cite{glove}. In the latter case, embeddings for each word in the input vocabulary are usually computed with shallow encoders. 
+
+These emebddings are then used as inputs for models specialized in processing sequential inputs. Nowadays, such models are mostly based on the Transformer architecture \cite{transformers}, which has the attention mechanism at its core. Instead, before this revolution, NLP competition's leaderboards were mostly populated by models based on recurrent and convolutional modules.
+
+The most influential recurrent networks are LSTMs \cite{lstm} and GRUs \cite{gru}. They are both based on processing sequential inputs and they keep an evolving series of hidden states, such that the output $h_t^{(0)}$ is a function of $h_{t-1}^{(0)}$ and the input $x_t$ at position $t$. Recurrent layers can also be stacked to increase the capacity of the network: in that case, $h_t^{(0)}$ would act as an input to $h_t^{(1)}$, i.e. the first hidden state of the next depth-wise layer, and the same goes for the successive layers, as shown in figure \ref{fig:recurrent}.
+
+\begin{figure}[h]
+    \center
+    \includegraphics[width=0.65\linewidth]{recurrent}
+    \caption{Recurrent module (image courtesy of \cite{recurrent-img})}
+    \label{fig:recurrent}
+\end{figure}
+
+Since RNNs are not well suited for keeping track of long-term dependencies, some refined 
+modules were invented just for that. One example of such improvement is bi-directionality: the input is processed in two ways, from left to right (the "forward" pass) and from right to left (the "backward" pass); then, outputs of the two computations are merged together (usually by concatenating them over their last dimension). The intuition behind bi-directional RNNs is that they tend to understand the overall context better than their uni-directional counterparts, since they are able to aggregate information from the "past" and from the "future".
+
+About Transformers, at a high-level, they comprise a stack of encoder-decoder modules, where each encoder features a multi-head attention block (to focus on different subsets of the input sequence when encoding one specific token) and a point-wise fully-connected layer, while each decoder features the same architecture as the encoder, but with an additional multi-head attention block in the middle (that helps the decoder focus on relevant parts of the input sequence).
+
+The multi-head attention modules in the Transformer architecture are the ones responsible for gathering information from other tokens in the input sequence, thus resembling the task of hidden states in RNNs (i.e. incorporate the representation of previous inputs with the currently processed one).
+
+\begin{figure}[h]
+    \center
+    \includegraphics[width=0.45\linewidth]{transformers}
+    \caption{Transformers (image taken from \cite{transformers})}
+    \label{fig:transformers}
+\end{figure}
+
+While Transformers may always seem the way to go, since they throw away all the computational burden of training recurrent modules (which are sequential in nature and, thus, scarcely parallelizable), they also suffer from limitations due to the quadratic complexity of attention and the inherent maximum number of input tokens (which is implicitly linked to architecture choices themselves).
+
 
 \chapter{System description}\label{chap:system-description}
 
