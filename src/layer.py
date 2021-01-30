@@ -237,18 +237,20 @@ class QAOutput(nn.Module):
         Given start and end tokens probabilities,
         return the most probable answer span (in tokens)
         """
-        end_indexes = end_probs.argmax(dim=1, keepdims=True)
-        indexes = torch.stack(
-            start_probs.shape[0] * [torch.arange(start_probs.shape[1])]
-        ).to(self.device)
-        masked_start = torch.where(
-            indexes <= end_indexes,
-            start_probs,
-            torch.tensor(-np.inf, dtype=torch.float32, device=self.device),
+        # Compute the joint probability distribution
+        p_joint = torch.einsum("bi,bj->bij", (start_probs, end_probs))
+        is_legal_pair = torch.triu(
+            torch.ones((start_probs.shape[1], end_probs.shape[1]), device=self.device)
         )
-        start_indexes = masked_start.argmax(dim=1, keepdims=True)
+        p_joint *= is_legal_pair
 
-        return torch.cat([start_indexes, end_indexes], dim=1)
+        # Take pair (i, j) that maximizes the joint probability
+        max_in_row, _ = torch.max(p_joint, dim=2)
+        max_in_col, _ = torch.max(p_joint, dim=1)
+        start_idxs = torch.argmax(max_in_row, dim=-1).unsqueeze(-1)
+        end_idxs = torch.argmax(max_in_col, dim=-1).unsqueeze(-1)
+
+        return torch.cat([start_indexes, end_indexes], dim=-1)
 
     def from_token_to_char(self, context_offsets, output_indexes):
         """

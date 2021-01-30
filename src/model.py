@@ -1,3 +1,5 @@
+import collections
+
 import transformers
 import torch
 import torch.nn as nn
@@ -29,12 +31,12 @@ class QAModel(nn.Module):
         saving pre-defined layers
         """
         st_dict = super().state_dict()
-        return {
-            k: st_dict[k]
-            for k in st_dict.keys()
-            for l in self.IGNORE_LAYERS
-            if not k.startswith(l)
-        }
+        keys = set(st_dict.keys())
+        for l in self.IGNORE_LAYERS:
+            for k in st_dict.keys():
+                if k.startswith(l):
+                    keys.remove(k)
+        return collections.OrderedDict({k: v for k, v in st_dict.items() if k in keys})
 
     def load_state_dict(self, state_dict, strict=False):
         """

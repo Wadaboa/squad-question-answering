@@ -295,9 +295,7 @@ class TransformerSquadTokenizer(SquadTokenizer):
         return batch
 
 
-def get_transformer_tokenizer(
-    vocab_path="data/bert-base-uncased-vocab.txt", max_tokens=512, device="cpu"
-):
+def get_transformer_tokenizer(vocab_path, max_tokens, device="cpu"):
     """
     Return a tokenizer to be used with Transformer-based models
     """
@@ -308,7 +306,7 @@ def get_transformer_tokenizer(
 
 
 def get_recurrent_tokenizer(
-    vocab, max_context_tokens, unk_token="[UNK]", pad_token="[PAD]", device="cpu"
+    vocab, max_context_tokens, unk_token, pad_token, device="cpu"
 ):
     """
     Return a tokenizer to be used with recurrent-based models

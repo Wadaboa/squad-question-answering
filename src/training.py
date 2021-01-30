@@ -305,7 +305,7 @@ class CustomWandbCallback(WandbCallback):
 
     def on_epoch_begin(self, args, state, control, **kwargs):
         """
-        Initialize metrics and save the first model checkpoint
+        Initialize metrics and save model checkpoints
         """
         self.metrics = collections.defaultdict(list)
         self._save_checkpoint(args.output_dir, state.global_step)
