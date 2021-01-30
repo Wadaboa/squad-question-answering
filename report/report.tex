@@ -99,7 +99,16 @@ In this work we address a question answering problem and, in particular, the Sta
 
 This project focuses on the SQuAD v1.1 dataset, that contains more than 100,000 question-answer pairs on more than 500 articles. Here each question has at least one associated answer, whereas in the SQuAD v2.0 dataset there are also questions with no answers at all.
 
-In this work we implement and compare three different models: a naïve LSTM encoder-decoder that will act as our baseline, the Bi-Directional Attention Flow (BIDAF) network (CITAZIONE) and a model that wraps a pretrained Bidirectional Encoder Representations from Transformers (BERT), as language model, coupled with a custom output layer on top of it.
+In this work we implement and compare five different models: 
+\begin{itemize}
+  \item a naïve LSTM encoder-decoder that will act as our baseline;
+  \item the Bi-Directional Attention Flow (BIDAF) network (CITAZIONE);
+  \item a model that wraps a pretrained Bidirectional Encoder Representations from Transformers (BERT), as language model, coupled with a custom output layer on top of it;
+  \item a model that wraps DistilBERT, a smaller general-purpose language representation model, 40\% smaller then BERT but with 97\% of its language understanding capabilities and 60\% faster;
+  \item a model that wraps ELECTRA, a more sample-efficient pre-training task called "replaced token detection".
+
+\end{itemize}
+For the last three models, we developed a modular reusable output layer, allowing us to implement different models by only change the language model levels (input, embedding and modelling).
 
 Our experimental evaluations show that our models achieve …………………………………………….
 
@@ -120,7 +129,7 @@ The most influential recurrent networks are LSTMs \cite{lstm} and GRUs \cite{gru
     \label{fig:recurrent}
 \end{figure}
 
-Since RNNs are not well suited for keeping track of long-term dependencies, some refined 
+Since RNNs are not well suited for keeping track of long-term dependencies, some refined ---> lstm tengono memoria, bilstm è per il motivo che dici piu avanti
 modules were invented just for that. One example of such improvement is bi-directionality: the input is processed in two ways, from left to right (the "forward" pass) and from right to left (the "backward" pass); then, outputs of the two computations are merged together (usually by concatenating them over their last dimension). The intuition behind bi-directional RNNs is that they tend to understand the overall context better than their uni-directional counterparts, since they are able to aggregate information from the "past" and from the "future".
 
 About Transformers, at a high-level, they comprise a stack of encoder-decoder modules, where each encoder features a multi-head attention block (to focus on different subsets of the input sequence when encoding one specific token) and a point-wise fully-connected layer, while each decoder features the same architecture as the encoder, but with an additional multi-head attention block in the middle (that helps the decoder focus on relevant parts of the input sequence).
