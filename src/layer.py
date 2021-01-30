@@ -247,8 +247,8 @@ class QAOutput(nn.Module):
         # Take pair (i, j) that maximizes the joint probability
         max_in_row, _ = torch.max(p_joint, dim=2)
         max_in_col, _ = torch.max(p_joint, dim=1)
-        start_idxs = torch.argmax(max_in_row, dim=-1).unsqueeze(-1)
-        end_idxs = torch.argmax(max_in_col, dim=-1).unsqueeze(-1)
+        start_indexes = torch.argmax(max_in_row, dim=-1).unsqueeze(-1)
+        end_indexes = torch.argmax(max_in_col, dim=-1).unsqueeze(-1)
 
         return torch.cat([start_indexes, end_indexes], dim=-1)
 
