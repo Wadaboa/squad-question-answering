@@ -54,7 +54,6 @@ class QABaselineModel(QAModel):
     def __init__(
         self,
         embedding_module,
-        max_context_tokens,
         hidden_size=100,
         num_recurrent_layers=2,
         bidirectional=False,
@@ -85,7 +84,7 @@ class QABaselineModel(QAModel):
         self.out_lstm = layer.LSTM(
             out_dim, hidden_size, batch_first=True, bidirectional=bidirectional
         )
-        self.output_layer = QAOutput(
+        self.output_layer = layer.QAOutput(
             out_dim, 1, dropout_rate=dropout_rate, classifier_bias=True, device=device,
         )
 
@@ -190,7 +189,7 @@ class QABiDAFModel(QAModel):
         self.out_lstm = layer.LSTM(
             2 * hidden_size, hidden_size, batch_first=True, bidirectional=True,
         )
-        self.output_layer = QAOutput(
+        self.output_layer = layer.QAOutput(
             10 * hidden_size,
             1,
             dropout_rate=self.dropout_rate,
@@ -268,7 +267,7 @@ class QABertModel(QAModel):
             batch_first=True,
             bidirectional=False,
         )
-        self.output_layer = QAOutput(
+        self.output_layer = layer.QAOutput(
             self.BERT_OUTPUT_SIZE,
             1,
             dropout_rate=dropout_rate,

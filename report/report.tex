@@ -94,21 +94,20 @@
 
 \chapter{Summary}\label{chap:introduction}
 
-The tasks of machine comprehension (MC) and question answering (QA) have gained significant popularity over the past few years within the natural language processing and computer vision communities. Systems trained end-to-end now achieve great results on a variety of tasks in the text and image domains.
+The tasks of Machine Comprehension (MC) and Question Answering (QA) have gained significant popularity over the past few years within the natural language processing and computer vision communities. Systems trained end-to-end now achieve great results on a variety of tasks in the text and image domains.
 
 In this work we address a question answering problem and, in particular, the Stanford Question Answer Dataset (SQuAD) problem: given a large collection of Wikipedia articles with associated questions, the goal is to identify the span of characters that contains the answer to the question.
 
 This project focuses on the SQuAD v1.1 dataset, that contains more than 100,000 question-answer pairs on more than 500 articles. Here each question has at least one associated answer, whereas in the SQuAD v2.0 dataset there are also questions with no answers at all.
 
 In this work we implement and compare five different models: 
-\begin{itemize}
-  \item a naïve LSTM encoder-decoder that will act as our baseline;
-  \item the Bi-Directional Attention Flow (BIDAF) network (CITAZIONE);
-  \item a model that wraps a pretrained Bidirectional Encoder Representations from Transformers (BERT), as language model, coupled with a custom output layer on top of it;
-  \item a model that wraps DistilBERT, a smaller general-purpose language representation model, 40\% smaller then BERT but with 97\% of its language understanding capabilities and 60\% faster;
-  \item a model that wraps ELECTRA, a more sample-efficient pre-training task called "replaced token detection".
-
-\end{itemize}
+\begin{enumerate}
+  \item A naïve LSTM encoder-decoder that will act as our baseline
+  \item The Bi-Directional Attention Flow (BIDAF) network \cite{bidaf}
+  \item A model that wraps a pretrained Bidirectional Encoder Representations from Transformers (BERT) \cite{bert}, as language model, coupled with a custom output layer on top of it
+  \item A model that wraps DistilBERT \cite{distilbert}, a smaller general-purpose language representation model, 40\% smaller then BERT but with 97\% of its language understanding capabilities and 60\% faster
+  \item A model that wraps ELECTRA \cite{electra}, a more sample-efficient pre-training task called "replaced token detection"
+\end{enumerate}
 For the last three models, we developed a modular reusable output layer, allowing us to implement different models by only change the language model levels (input, embedding and modelling).
 
 Our experimental evaluations show that our models achieve …………………………………………….
@@ -158,26 +157,31 @@ In order to perform an effective models’ comparison, each model shares the sam
 
 The following is a detailed description of the models.
 
-\section{Baseline}\label{sec:baseline}
+\section{Recurrent-based models}\label{sec:recurrent-models}
+\subsection{Baseline}\label{subsec:baseline}
 
-….
+The baseline model is composed by a single recurrent encoder, which is given both questions and contexts as two separate inputs. Then, all the hidden states of a single question are averaged together (over the embedding dimension) so as to obtain a single vector which should encode the semantic information of the question at the sentence level. This aggregated question vector is then element-wise multiplied to each context token latent representation, so as to perform some kind of query-aware context encoding. Finally, the query-aware context vectors are passed onto another recurrent module and used as inputs for the end token classifier, while the query-aware context vectors are directly used as input for the start token classifier.
 
-\section{BiDAF}\label{sec:bidaf}
+\subsection{BiDAF}\label{subsec:bidaf}
 
 Sintesi tra paper bidaf e medium
 
-\section{BERT}\label{sec:bert}
+\section{Transformer-based models}\label{sec:transformer-models}
 
-….
+
+\section{Output layer}\label{sec:output-layer}
+
 
 \chapter{Experimental setup and results}\label{chap:experiments}
 
-\section{Data handling}
+\section{Data handling}\label{sec:data-handling}
 Given the JSON training set, we decided to parse it into a suitable tabular data structure, which turned to be useful even for subsequent pre-processing tasks. In particular, since each context has multiple question/answer pairs and each question can have multiple answers, we allocated one row for each context/question/answer triple, thus replicating the same context and question multiple times, in order to consider it as a separate example.
 
 Regarding the splitting strategy for the dataset, we went for a simple holdout, thus setting aside $20\%$ of the whole dataset for validation purposes. The way the validation set is built guarantees that the entire set of rows referencing to the same context is kept into the same split, thus avoiding unjustifiable boosting of results.
 
 As an additional test, we evaluated all of our models on the official SQuAD v1.1 dev set. The main difference between this dataset and the training one is that the same question can have multiple correct answers.
+
+Moreover, final models are re-trained on the whole dataset (by merging training and validation splits), so as to simulate the cross-validation strategy.
 
 \section{Tokenization}
 Tokenization has the following meaning: given a string of text, its task is to split it into sub-strings (called tokens), depending on the chosen algorithm. Different models call for different tokenization pipelines. In our case, we have two macro-categories:
@@ -222,21 +226,39 @@ All of the training and validation processes were executed on Google Colaborator
 Training and evaluation metrics, along with model checkpoints and results, are directly logged into a W\&B project \cite{wandb}, which is openly accessible \href{https://wandb.ai/wadaboa/squad-qa}{here}.
 
 \section{Results}
+Table \ref{table:results} shows the best results obtained in the training, validation and testing phases of each model, with the hyperparameters listed in table \ref{table:hyperparameters}. In particular, by "training" we mean a learning run over the whole dataset (training and validation splits combined together), by "validation" we mean the evaluation of a model on the validation split described in \ref{sec:data-handling}, while "testing" represents metrics obtained on the official SQuAD v1.1 dev set with models trained on the whole dataset. 
 
 \begin{table}[h]
   \center
   \begin{tabular}{|c|c|c|c|c|c|c|}
   \hline
   \multirow{2}{*}{}   & \multicolumn{2}{c|}{\textbf{Training}} & \multicolumn{2}{c|}{\textbf{Validation}} & \multicolumn{2}{c|}{\textbf{Test}} \\ \cline{2-7} 
-                      & \textbf{F1}        & \textbf{EM}       & \textbf{F1}         & \textbf{EM}        & \textbf{F1}      & \textbf{EM}     \\ \hline
-  \textbf{Baseline}   &                    &                   &                     &                    &                  &                 \\ \hline
-  \textbf{BiDAF}      &                    &                   &                     &                    &                  &                 \\ \hline
-  \textbf{BERT}       &                    &                   &                     &                    &                  &                 \\ \hline
-  \textbf{DistilBERT} &                    &                   &                     &                    &                  &                 \\ \hline
-  \textbf{ELECTRA}    &                    &                   &                     &                    &                  &                 \\ \hline
+                      & \textbf{F1} (\%) & \textbf{EM} (\%) & \textbf{F1} (\%) & \textbf{EM} (\%) & \textbf{F1} (\%) & \textbf{EM} (\%)     \\ \hline
+  \textbf{Baseline}   &                    &                   & $37.28$           & $26.33$          &                  &                 \\ \hline
+  \textbf{BiDAF}      & $65.23$            & $45.61$           & $68.05$           & $55.31$          & $73.54$          & $63.14$       \\ \hline
+  \textbf{BERT}       & $70.96$            & $54.21$           & $79.82$           & $68.03$          & $83.46$          & $74.36$       \\ \hline
+  \textbf{DistilBERT} &                    &                   & $78.82$           & $66.17$          &                  &                 \\ \hline
+  \textbf{ELECTRA}    &                    &                   & $84.19$           & $72.23$          &                  &                 \\ \hline
   \end{tabular}
-  \caption{Results}
+  \caption{Best results}
   \label{table:results}
+\end{table}
+
+The hyperparameters listed in table \ref{table:hyperparameters} were mainly taken from the corresponding models' paper, in order to have a well-estabilished benchmark. 
+
+\begin{table}[h]
+  \center
+  \begin{tabular}{|c|c|c|c|c|}
+  \hline
+                      & \textbf{Epochs} & \textbf{Batch size} & \textbf{Optimizer} & \textbf{Learning rate} \\ \hline
+  \textbf{Baseline}   & $30$            & $128$               & Adam               & $1e-3$                 \\ \hline
+  \textbf{BiDAF}      & $12$            & $60$                & Adadelta           & $0.5$                  \\ \hline
+  \textbf{BERT}       & $3$             & $8$                 & Adam               & $5e-5$                 \\ \hline
+  \textbf{DistilBERT} & $3$             & $16$                & Adam               & $5e-5$                 \\ \hline
+  \textbf{ELECTRA}    & $3$             & $8$                 & Adam               & $5e-5$                 \\ \hline
+  \end{tabular}
+  \caption{Hyperparameters}
+  \label{table:hyperparameters}
 \end{table}
 
 \chapter{Analysis of results}\label{chap:analysis-results}
