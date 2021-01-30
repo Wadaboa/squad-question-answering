@@ -38,6 +38,7 @@
 \usepackage{booktabs}
 \usepackage{longtable}
 \usepackage{geometry}
+\usepackage{multirow}
 \graphicspath{ {../assets/img/} }
 
 \newgeometry{hmargin={30mm,30mm}}
@@ -129,8 +130,7 @@ The most influential recurrent networks are LSTMs \cite{lstm} and GRUs \cite{gru
     \label{fig:recurrent}
 \end{figure}
 
-Since RNNs are not well suited for keeping track of long-term dependencies, some refined ---> lstm tengono memoria, bilstm è per il motivo che dici piu avanti
-modules were invented just for that. One example of such improvement is bi-directionality: the input is processed in two ways, from left to right (the "forward" pass) and from right to left (the "backward" pass); then, outputs of the two computations are merged together (usually by concatenating them over their last dimension). The intuition behind bi-directional RNNs is that they tend to understand the overall context better than their uni-directional counterparts, since they are able to aggregate information from the "past" and from the "future".
+In natural language, meaning does not usually simply flow from left to right, so that in RNNs other techniques may be necessary to reach a higher level of understanding. One example of such improvement is bi-directionality: the input is processed in two ways, from left to right (the "forward" pass) and from right to left (the "backward" pass); then, outputs of the two computations are merged together (usually by concatenating them over their last dimension). The intuition behind bi-directional RNNs is that they tend to understand the overall context better than their uni-directional counterparts, since they are able to aggregate information from the "past" and from the "future".
 
 About Transformers, at a high-level, they comprise a stack of encoder-decoder modules, where each encoder features a multi-head attention block (to focus on different subsets of the input sequence when encoding one specific token) and a point-wise fully-connected layer, while each decoder features the same architecture as the encoder, but with an additional multi-head attention block in the middle (that helps the decoder focus on relevant parts of the input sequence).
 
@@ -171,6 +171,73 @@ Sintesi tra paper bidaf e medium
 ….
 
 \chapter{Experimental setup and results}\label{chap:experiments}
+
+\section{Data handling}
+Given the JSON training set, we decided to parse it into a suitable tabular data structure, which turned to be useful even for subsequent pre-processing tasks. In particular, since each context has multiple question/answer pairs and each question can have multiple answers, we allocated one row for each context/question/answer triple, thus replicating the same context and question multiple times, in order to consider it as a separate example.
+
+Regarding the splitting strategy for the dataset, we went for a simple holdout, thus setting aside $20\%$ of the whole dataset for validation purposes. The way the validation set is built guarantees that the entire set of rows referencing to the same context is kept into the same split, thus avoiding unjustifiable boosting of results.
+
+As an additional test, we evaluated all of our models on the official SQuAD v1.1 dev set. The main difference between this dataset and the training one is that the same question can have multiple correct answers.
+
+\section{Tokenization}
+Tokenization has the following meaning: given a string of text, its task is to split it into sub-strings (called tokens), depending on the chosen algorithm. Different models call for different tokenization pipelines. In our case, we have two macro-categories:
+\begin{enumerate}
+  \item Recurrent-based models tokenizer: splits words by whitespaces and punctuations, removes accents and applies a lowercasing function to all the tokens. Moreover, questions are padded (not truncated), while contexts are truncated and padded. Taking inspiration from \cite{max-context-tokens}, the maximum number of tokens for truncating contexts was fixed to $300$. 
+  \item Transformer-based models tokenizer: splits words using the WordPiece algorithm (introduced in \cite{wordpiece}), removes accents and applies a lowercasing function to all the tokens, while also merging together questions and contexts as $[CLS] q_1 q_2 \dots q_n [SEP] c_1 c_2 \dots c_m [SEP]$ (it leverages the special tokens $[CLS]$ and $[SEP]$). Moreover, the combined question/context sentence is truncated to a maximum number of tokens ($512$, as in \cite{bert}) and padded to the right.
+\end{enumerate} 
+Tokenization happens on the fly at the batch level, thus enabling us to perform dynamic padding (based on the longest sequence in a batch) and avoiding the pre-tokenization overhead.
+
+The tokenizer is also used as some kind of pre-processor, to remove from the training dataset those rows whose contexts would not contain the relative answer, after truncation. 
+
+\section{Embeddings}
+In recurrent-based models, tokens are numerically encoded using the standard GloVe embeddings. In particular, we tested different types of GloVe models, with different embedding dimensions:
+\begin{itemize}
+  \item Wikipedia 2014 and Gigaword 5 (6B tokens, 400K vocab, uncased, 300d vectors)
+  \item Twitter (2B tweets, 27B tokens, 1.2M vocab, uncased, 200d vectors)
+\end{itemize}
+
+We additionally embedded two more tokens (not present in the standard GloVe vocabulary):
+\begin{enumerate}
+  \item $[PAD]$: the corresponding vector contains all zeros
+  \item $[UNK]$: the corresponding vector, which is used to handle OOV (Out Of Vocabulary) words, is the mean of all the GloVe vectors, as reported by Pennington (one of GloVe's authors) 
+  \begin{displayquote}I've found that just taking an average of all or a subset of the word vectors produces a good unknown vector \end{displayquote}
+\end{enumerate}
+
+In Transformer-based models, we instead rely on the wrapped language models of the HuggingFace library \cite{hugginface}, so that there is no need to manually handle token embeddings.
+
+\section{Metrics}
+Models are evaluated at the end of each epoch and metrics are computed for both the training and validation set. In our case, the validation set was mainly used to track models' performance on unseen data, in order to avoid overfitting problems.
+
+Metrics used for evaluating the models are F1 and EM (Exact Match) and they were taken from the official SQuAD evaluation script. The F1 score ($f1=\frac{2\cdot p \cdot r}{p+r}$), defined as the harmonic mean between precision ($p=\frac{TP}{TP+FP}$) and recall ($r=\frac{TP}{TP+FN}$), is computed per question and then averaged across all questions. The EM score is instead computed as the number of questions that are answered in exact same words as the ground truth, divided by the total number of questions.
+
+Since the same question can have multiple ground truths (specifically, in the dev set), there is the need to select just one for each question. To fulfill this requirement, only the nearest ground truth for each prediction is considered: given a prediction $p=[p_s, p_e]$, where $p_s$ is the start index of the predicted answer and $p_e$ is the corresponding end index, and a set of associated ground truths $G=\{[g_s^{(0)},g_e^{(0)}], \dots, [g_s^{(n)},g_e^{(n)}]\}$, the selected ground truth is $\min_{g\in G}\Vert p - g\Vert_2$. 
+
+Moreover, we noticed that the training set does not have multiple answers for the same question, so this "nearest answer" approach comes into play only at inference time: this is actually the desired behavior, since at training time the described technique could lead to an unstable learning process, given by the non-stationarity of the target distribution.
+
+\section{Environment}
+The main third-party libraries on which the project is based on are PyTorch \cite{pytorch}, an open source machine learning framework with automatic differentiation and eager execution, and HuggingFace \cite{hugginface}, a library to build, train and deploy state of the art NLP models.
+
+All of the training and validation processes were executed on Google Colaboratory \cite{colab}, a platform that gives the possibility to exploit some computational resources for free. In particular, Colab allows you to select a GPU runtime, that boosts the training time of neural models and most of the times we were assigned an NVIDIA Tesla T4 GPU, with 16GB of RAM. 
+
+Training and evaluation metrics, along with model checkpoints and results, are directly logged into a W\&B project \cite{wandb}, which is openly accessible \href{https://wandb.ai/wadaboa/squad-qa}{here}.
+
+\section{Results}
+
+\begin{table}[h]
+  \center
+  \begin{tabular}{|c|c|c|c|c|c|c|}
+  \hline
+  \multirow{2}{*}{}   & \multicolumn{2}{c|}{\textbf{Training}} & \multicolumn{2}{c|}{\textbf{Validation}} & \multicolumn{2}{c|}{\textbf{Test}} \\ \cline{2-7} 
+                      & \textbf{F1}        & \textbf{EM}       & \textbf{F1}         & \textbf{EM}        & \textbf{F1}      & \textbf{EM}     \\ \hline
+  \textbf{Baseline}   &                    &                   &                     &                    &                  &                 \\ \hline
+  \textbf{BiDAF}      &                    &                   &                     &                    &                  &                 \\ \hline
+  \textbf{BERT}       &                    &                   &                     &                    &                  &                 \\ \hline
+  \textbf{DistilBERT} &                    &                   &                     &                    &                  &                 \\ \hline
+  \textbf{ELECTRA}    &                    &                   &                     &                    &                  &                 \\ \hline
+  \end{tabular}
+  \caption{Results}
+  \label{table:results}
+\end{table}
 
 \chapter{Analysis of results}\label{chap:analysis-results}
 

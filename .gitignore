@@ -413,3 +413,6 @@ TSWLatexianTemp*
 
 # Makeindex log files
 *.lpz
+
+# Other latex files
+__latexindent_temp*

@@ -64,7 +64,7 @@
 }
 
 @article{transformers,
-  author    = {Ashish Vaswani and
+  author        = {Ashish Vaswani and
                Noam Shazeer and
                Niki Parmar and
                Jakob Uszkoreit and
@@ -72,46 +72,171 @@
                Aidan N. Gomez and
                Lukasz Kaiser and
                Illia Polosukhin},
-  title     = {Attention Is All You Need},
-  journal   = {CoRR},
-  volume    = {abs/1706.03762},
-  year      = {2017},
-  url       = {http://arxiv.org/abs/1706.03762},
-  archivePrefix = {arXiv},
-  eprint    = {1706.03762}
+  title         = {Attention Is All You Need},
+  journal       = {CoRR},
+  volume        = {abs/1706.03762},
+  year          = {2017},
+  url           = {http://arxiv.org/abs/1706.03762},
+  archiveprefix = {arXiv},
+  eprint        = {1706.03762}
 }
 
 @article{lstm,
-  author      = {Sepp Hochreiter and Jürgen Schmidhuber},
-  journal     = {Neural Computation},
-  title       = {Long Short-Term Memory},
-  year        = {1997},
-  number      = {8},
-  pages       = {1735--1780},
-  volume      = {9},
+  author   = {Sepp Hochreiter and Jürgen Schmidhuber},
+  journal  = {Neural Computation},
+  title    = {Long Short-Term Memory},
+  year     = {1997},
+  number   = {8},
+  pages    = {1735--1780},
+  volume   = {9},
   abstract = {Learning to store information over extended time intervals by recurrent backpropagation takes a very long time, mostly because of insufficient, decaying error backflow. We briefly review Hochreiter's (1991) analysis of this problem, then address it by introducing a novel, efficient, gradient based method called long short-term memory (LSTM). Truncating the gradient where this does not do harm, LSTM can learn to bridge minimal time lags in excess of 1000 discrete-time steps by enforcing constant error flow through constant error carousels within special units. Multiplicative gate units learn to open and close access to the constant error flow. LSTM is local in space and time; its computational complexity per time step and weight is O. 1. Our experiments with artificial data involve local, distributed, real-valued, and noisy pattern representations. In comparisons with real-time recurrent learning, back propagation through time, recurrent cascade correlation, Elman nets, and neural sequence chunking, LSTM leads to many more successful runs, and learns much faster. LSTM also solves complex, artificial long-time-lag tasks that have never been solved by previous recurrent network algorithms.},
-  doi      = {10.1162/neco.1997.9.8.1735},
+  doi      = {10.1162/neco.1997.9.8.1735}
 }
 
-@InProceedings{gru,
-  title = 	 {Deep Gate Recurrent Neural Network},
-  author = 	 {Yuan Gao and Dorota Glowacka},
-  booktitle = 	 {Proceedings of The 8th Asian Conference on Machine Learning},
-  pages = 	 {350--365},
-  year = 	 {2016},
-  editor = 	 {Robert J. Durrant and Kee-Eung Kim},
-  volume = 	 {63},
-  series = 	 {Proceedings of Machine Learning Research},
-  address = 	 {The University of Waikato, Hamilton, New Zealand},
-  month = 	 {16--18 Nov},
-  publisher =    {PMLR},
-  pdf = 	 {http://proceedings.mlr.press/v63/gao30.pdf},
-  url = 	 {http://proceedings.mlr.press/v63/gao30.html},
-  abstract = 	 {This paper explores the possibility of using multiplicative gates to build two recurrent neural network structures. These two structures are called Deep Simple Gated Unit (DSGU) and Simple Gated Unit (SGU), which are structures for learning long-term dependencies. Compared to traditional Long Short-Term Memory (LSTM) and Gated Recurrent Unit (GRU), both structures require fewer parameters and less computation time in sequence classification tasks. Unlike GRU and LSTM, which require more than one gate to control information flow in the network, SGU and DSGU only use one multiplicative gate to control the flow of information. We show that this difference can accelerate the learning speed in tasks that require long dependency information. We also show that DSGU is more numerically stable than SGU. In addition, we also propose a standard way of representing the inner structure of RNN called RNN Conventional Graph (RCG), which helps to analyze the relationship between input units and hidden units of RNN.}
+@inproceedings{gru,
+  title     = {Deep Gate Recurrent Neural Network},
+  author    = {Yuan Gao and Dorota Glowacka},
+  booktitle = {Proceedings of The 8th Asian Conference on Machine Learning},
+  pages     = {350--365},
+  year      = {2016},
+  editor    = {Robert J. Durrant and Kee-Eung Kim},
+  volume    = {63},
+  series    = {Proceedings of Machine Learning Research},
+  address   = {The University of Waikato, Hamilton, New Zealand},
+  month     = {16--18 Nov},
+  publisher = {PMLR},
+  pdf       = {http://proceedings.mlr.press/v63/gao30.pdf},
+  url       = {http://proceedings.mlr.press/v63/gao30.html},
+  abstract  = {This paper explores the possibility of using multiplicative gates to build two recurrent neural network structures. These two structures are called Deep Simple Gated Unit (DSGU) and Simple Gated Unit (SGU), which are structures for learning long-term dependencies. Compared to traditional Long Short-Term Memory (LSTM) and Gated Recurrent Unit (GRU), both structures require fewer parameters and less computation time in sequence classification tasks. Unlike GRU and LSTM, which require more than one gate to control information flow in the network, SGU and DSGU only use one multiplicative gate to control the flow of information. We show that this difference can accelerate the learning speed in tasks that require long dependency information. We also show that DSGU is more numerically stable than SGU. In addition, we also propose a standard way of representing the inner structure of RNN called RNN Conventional Graph (RCG), which helps to analyze the relationship between input units and hidden units of RNN.}
 }
 
 @online{recurrent-img,
   author = {Nikolai Morin},
   title  = {What's the difference between “hidden” and “output” in PyTorch LSTM?},
   url    = {https://stackoverflow.com/questions/48302810/whats-the-difference-between-hidden-and-output-in-pytorch-lstm}
+}
+
+
+@techreport{max-context-tokens,
+  title       = {{Question Answering on the SQuAD Dataset}},
+  author      = {Do-Hyoung Park and Vihan Lakshman},
+  institution = {Stanford University},
+  month       = {01}
+}
+
+@misc{bert,
+  abstract  = {We introduce a new language representation model called BERT, which stands
+for Bidirectional Encoder Representations from Transformers. Unlike recent
+language representation models, BERT is designed to pre-train deep
+bidirectional representations by jointly conditioning on both left and right
+context in all layers. As a result, the pre-trained BERT representations can be
+fine-tuned with just one additional output layer to create state-of-the-art
+models for a wide range of tasks, such as question answering and language
+inference, without substantial task-specific architecture modifications.
+  BERT is conceptually simple and empirically powerful. It obtains new
+state-of-the-art results on eleven natural language processing tasks, including
+pushing the GLUE benchmark to 80.4% (7.6% absolute improvement), MultiNLI
+accuracy to 86.7 (5.6% absolute improvement) and the SQuAD v1.1 question
+answering Test F1 to 93.2 (1.5% absolute improvement), outperforming human
+performance by 2.0%.},
+  added-at  = {2019-02-05T23:35:51.000+0100},
+  author    = {Devlin, Jacob and Chang, Ming-Wei and Lee, Kenton and Toutanova, Kristina},
+  interhash = {a74f4c3853d3f0340e75546639134e91},
+  intrahash = {10c860e3f390c6fbfd78a3b91ab9b0af},
+  keywords  = {bert elmo embeddings kallimachos nlp proposal-knowledge wordembeddings},
+  note      = {cite arxiv:1810.04805Comment: 13 pages},
+  timestamp = {2020-07-28T14:17:24.000+0200},
+  title     = {BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding},
+  url       = {http://arxiv.org/abs/1810.04805},
+  year      = 2018
+}
+
+@article{wordpiece,
+  author        = {Yonghui Wu and
+               Mike Schuster and
+               Zhifeng Chen and
+               Quoc V. Le and
+               Mohammad Norouzi and
+               Wolfgang Macherey and
+               Maxim Krikun and
+               Yuan Cao and
+               Qin Gao and
+               Klaus Macherey and
+               Jeff Klingner and
+               Apurva Shah and
+               Melvin Johnson and
+               Xiaobing Liu and
+               Lukasz Kaiser and
+               Stephan Gouws and
+               Yoshikiyo Kato and
+               Taku Kudo and
+               Hideto Kazawa and
+               Keith Stevens and
+               George Kurian and
+               Nishant Patil and
+               Wei Wang and
+               Cliff Young and
+               Jason Smith and
+               Jason Riesa and
+               Alex Rudnick and
+               Oriol Vinyals and
+               Greg Corrado and
+               Macduff Hughes and
+               Jeffrey Dean},
+  title         = {Google's Neural Machine Translation System: Bridging the Gap between
+               Human and Machine Translation},
+  journal       = {CoRR},
+  volume        = {abs/1609.08144},
+  year          = {2016},
+  url           = {http://arxiv.org/abs/1609.08144},
+  archiveprefix = {arXiv},
+  eprint        = {1609.08144},
+  timestamp     = {Thu, 14 Jan 2021 12:12:19 +0100}
+}
+
+@article{hugginface,
+  author        = {Thomas Wolf and
+               Lysandre Debut and
+               Victor Sanh and
+               Julien Chaumond and
+               Clement Delangue and
+               Anthony Moi and
+               Pierric Cistac and
+               Tim Rault and
+               R{\'{e}}mi Louf and
+               Morgan Funtowicz and
+               Jamie Brew},
+  title         = {HuggingFace's Transformers: State-of-the-art Natural Language Processing},
+  journal       = {CoRR},
+  volume        = {abs/1910.03771},
+  year          = {2019},
+  url           = {http://arxiv.org/abs/1910.03771},
+  archiveprefix = {arXiv},
+  eprint        = {1910.03771},
+  timestamp     = {Tue, 02 Jun 2020 12:49:01 +0200}
+}
+
+@incollection{pytorch,
+  title     = {PyTorch: An Imperative Style, High-Performance Deep Learning Library},
+  author    = {Paszke, Adam and Gross, Sam and Massa, Francisco and Lerer, Adam and Bradbury, James and Chanan, Gregory and Killeen, Trevor and Lin, Zeming and Gimelshein, Natalia and Antiga, Luca and Desmaison, Alban and Kopf, Andreas and Yang, Edward and DeVito, Zachary and Raison, Martin and Tejani, Alykhan and Chilamkurthy, Sasank and Steiner, Benoit and Fang, Lu and Bai, Junjie and Chintala, Soumith},
+  booktitle = {Advances in Neural Information Processing Systems 32},
+  editor    = {H. Wallach and H. Larochelle and A. Beygelzimer and F. d\textquotesingle Alch\'{e}-Buc and E. Fox and R. Garnett},
+  pages     = {8024--8035},
+  year      = {2019},
+  publisher = {Curran Associates, Inc.},
+  url       = {http://papers.neurips.cc/paper/9015-pytorch-an-imperative-style-high-performance-deep-learning-library.pdf}
+}
+
+@online{colab,
+  author = {Google},
+  title  = {Colaboratory},
+  url    = {https://colab.research.google.com/}
+}
+
+@misc{wandb,
+  title  = {Experiment Tracking with Weights and Biases},
+  year   = {2020},
+  note   = {Software available from wandb.com},
+  url    = {https://www.wandb.com/},
+  author = {Biewald, Lukas}
 }
