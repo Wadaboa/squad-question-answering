@@ -175,7 +175,7 @@ class QABiDAFModel(QAModel):
         )
 
         # Attention flow
-        self.attention = AttentionFlow(2 * hidden_size, device=device)
+        self.attention = layer.AttentionFlow(2 * hidden_size, device=device)
 
         # Modeling layer
         self.modeling_layer = layer.LSTM(
