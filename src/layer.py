@@ -280,7 +280,7 @@ class QAOutput(nn.Module):
         )
 
         # Get token and word answer spans
-        outputs = self.get_qa_outputs(start_probs, end_probs)
+        outputs = self.get_qa_outputs(torch.exp(start_probs), torch.exp(end_probs))
         word_outputs = self.from_token_to_char(inputs["context_offsets"], outputs)
 
         # If labels are present, compute loss
