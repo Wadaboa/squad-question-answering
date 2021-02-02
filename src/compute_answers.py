@@ -4,13 +4,13 @@ import os
 import numpy as np
 import torch
 
+import config
 import dataset
-import tokenizer
+import layer_utils
 import model
+import tokenizer
 import training
 import utils
-import config
-
 
 RECURRENT_MODELS = ("baseline", "bidaf")
 TRANSFORMER_MODELS = ("bert", "distilbert", "electra")
@@ -35,10 +35,10 @@ def load_recurrent_model(model_type, device):
         pad_token=config.PAD_TOKEN,
     )
     embedding_layer = layer_utils.get_embedding_module(
-        embedding_model, pad_id=vocab[PAD_TOKEN]
+        embedding_model, pad_id=vocab[config.PAD_TOKEN]
     )
 
-    tokenizer = tokenizer.get_recurrent_tokenizer(
+    model_tokenizer = tokenizer.get_recurrent_tokenizer(
         vocab,
         config.MAX_CONTEXT_TOKENS,
         config.UNK_TOKEN,
@@ -46,7 +46,7 @@ def load_recurrent_model(model_type, device):
         device=device,
     )
     model = MODELS[model_type](embedding_layer, device=device)
-    return tokenizer, model
+    return model_tokenizer, model
 
 
 def load_transformer_model(model_type, device):
@@ -58,7 +58,7 @@ def load_transformer_model(model_type, device):
         config.BERT_VOCAB_PATH, config.MAX_BERT_TOKENS, device=device
     )
     model = MODELS[model_type](device=device)
-    return tokenizer, model
+    return transformer_tokenizer, model
 
 
 def load_tokenizer_and_model(model_type, device):
@@ -92,7 +92,9 @@ def main(args):
         no_cuda=(args.device == "cpu"),
     )
     trainer = training.SquadTrainer(
-        model=squad_model, args=trainer_args, data_collator=data_manager.tokenizer,
+        model=squad_model,
+        args=trainer_args,
+        data_collator=data_manager.tokenizer,
     )
 
     test_output = trainer.predict(data_manager.test_dataset)
@@ -120,7 +122,9 @@ def parse_args():
         help="model type to test",
     )
     parser.add_argument(
-        "-w", "--weights", help="path to the model checkpoint to load",
+        "-w",
+        "--weights",
+        help="path to the model checkpoint to load",
     )
     parser.add_argument(
         "-r",
