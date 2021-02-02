@@ -26,7 +26,9 @@ def masked_softmax(x, dim, mask=None, log=False, eps=1e-4, device="cpu"):
     if mask is None:
         mask = torch.ones_like(x, device=device)
     exp = torch.exp(x) * torch.where(
-        mask, mask.float(), torch.tensor(eps, dtype=torch.float32, device=device),
+        mask,
+        mask.float(),
+        torch.tensor(eps, dtype=torch.float32, device=device),
     )
     softmax = exp / exp.sum(dim=dim).unsqueeze(-1)
     return softmax if not log else torch.log(softmax)

@@ -5,12 +5,12 @@ import re
 import string
 from functools import partial
 
+import gensim.downloader as gloader
 import numpy as np
 import pandas as pd
 import torch
 import transformers
-import gensim.downloader as gloader
-from IPython.display import display, HTML
+from IPython.display import HTML, display
 
 
 def get_nearest_answers(labels, preds, device="cpu"):

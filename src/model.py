@@ -41,7 +41,7 @@ class QAModel(nn.Module):
     def load_state_dict(self, state_dict, strict=False):
         """
         Override default state dict loading
-        to allow the non-strict way 
+        to allow the non-strict way
         """
         return super().load_state_dict(state_dict, strict=strict)
 
@@ -87,7 +87,11 @@ class QABaselineModel(QAModel):
             out_dim, hidden_size, batch_first=True, bidirectional=bidirectional
         )
         self.output_layer = layer.QAOutput(
-            out_dim, 1, dropout_rate=dropout_rate, classifier_bias=True, device=device,
+            out_dim,
+            1,
+            dropout_rate=dropout_rate,
+            classifier_bias=True,
+            device=device,
         )
 
         # Transfer model to device
@@ -104,7 +108,7 @@ class QABaselineModel(QAModel):
         hidden_contexts = self.projection(embedded_contexts)
 
         # Call the recurrent encoder for questions and contexts separately
-        padded_questions, padded_questions_lenghts = self.recurrent_module(
+        padded_questions, _ = self.recurrent_module(
             hidden_questions, inputs["question_lenghts"]
         )
         padded_contexts, _ = self.recurrent_module(
@@ -129,7 +133,7 @@ class QABaselineModel(QAModel):
 class QABiDAFModel(QAModel):
     """
     Custom implementation of a BiDAF model:
-    
+
     "Bidirectional Attention Flow for Machine Comprehension",
     Minjoon Seo, Aniruddha Kembhavi, Ali Farhadi, Hannaneh Hajishirzi
     """
@@ -189,7 +193,10 @@ class QABiDAFModel(QAModel):
 
         # Output layer
         self.out_lstm = layer.LSTM(
-            2 * hidden_size, hidden_size, batch_first=True, bidirectional=True,
+            2 * hidden_size,
+            hidden_size,
+            batch_first=True,
+            bidirectional=True,
         )
         self.output_layer = layer.QAOutput(
             10 * hidden_size,
@@ -248,7 +255,7 @@ class QABiDAFModel(QAModel):
 class QABertModel(QAModel):
     """
     BERT model wrapper, for question answering tasks
-    
+
     "BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding",
     Jacob Devlin, Ming-Wei Chang, Kenton Lee and Kristina Toutanova
     """
@@ -289,7 +296,7 @@ class QABertModel(QAModel):
 
     def get_model_inputs(self, **inputs):
         """
-        Return a subset of the given input dict, 
+        Return a subset of the given input dict,
         to be used as inputs for the wrapped Transformer
         (BERT takes "input_ids", "token_type_ids" and "attention_mask" as inputs)
         """
@@ -315,7 +322,7 @@ class QABertModel(QAModel):
 class QADistilBertModel(QABertModel):
     """
     DistilBERT model wrapper, for question answering tasks
-    
+
     "DistilBERT, a distilled version of BERT: smaller, faster, cheaper and lighter",
     Victor Sanh, Lysandre Debut, Julien Chaumond, Thomas Wolf
     """
@@ -333,7 +340,7 @@ class QADistilBertModel(QABertModel):
 
     def get_model_inputs(self, **inputs):
         """
-        Return a subset of the given input dict, 
+        Return a subset of the given input dict,
         to be used as inputs for the wrapped Transformer
         (DistilBERT takes "input_ids" and "attention_mask" as inputs)
         """
@@ -346,7 +353,7 @@ class QADistilBertModel(QABertModel):
 class QAElectraModel(QABertModel):
     """
     ELECTRA model wrapper, for question answering tasks
-    
+
     "ELECTRA: Pre-training Text Encoders as Discriminators Rather Than Generators",
     Kevin Clark, Minh-Thang Luong, Quoc V. Le, Christopher Manning
     """
