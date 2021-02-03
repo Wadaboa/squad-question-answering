@@ -1,13 +1,13 @@
 from collections import OrderedDict
 
 import numpy as np
-import transformers
 import torch
 import torch.nn as nn
+import transformers
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
-import utils
 import layer_utils
+import utils
 
 
 class MaskedSoftmax(nn.Module):
@@ -74,7 +74,7 @@ class LSTM(nn.Module):
 class Highway(nn.Module):
     """
     Generic Highway network
-    
+
     "Highway Networks",
     Rupesh Kumar Srivastava, Klaus Greff, Jürgen Schmidhuber
     """
@@ -116,9 +116,9 @@ class AttentionFlow(nn.Module):
 
     def get_similarity_input(self, questions, contexts):
         """
-        Both C2Q and Q2C attentions share a similarity matrix, 
-        between the contextual embeddings of the context and the query, 
-        where each element indicates the similarity between 
+        Both C2Q and Q2C attentions share a similarity matrix,
+        between the contextual embeddings of the context and the query,
+        where each element indicates the similarity between
         a context word and a query word
         """
         questions_shape = questions.shape
@@ -162,7 +162,7 @@ class AttentionFlow(nn.Module):
     def query_to_context(self, sim, contexts, contexts_mask):
         """
         Query-to-context (Q2C) attention signifies which context words
-        have the closest similarity to one of the query words 
+        have the closest similarity to one of the query words
         and are hence critical for answering the query
         """
         sim_max_col = sim.max(dim=2, keepdims=True)
@@ -301,5 +301,8 @@ class QAOutput(nn.Module):
 
         # If labels are not present, just return outputs
         return OrderedDict(
-            {"word_outputs": word_outputs, "indexes": inputs["indexes"],}
+            {
+                "word_outputs": word_outputs,
+                "indexes": inputs["indexes"],
+            }
         )

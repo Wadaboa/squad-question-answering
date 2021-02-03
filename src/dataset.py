@@ -17,7 +17,10 @@ class SquadDataset:
     JSON_RECORD_PATH = ["data", "paragraphs", "qas", "answers"]
 
     def __init__(
-        self, train_set_path=None, test_set_path=None, subset=1.0,
+        self,
+        train_set_path=None,
+        test_set_path=None,
+        subset=1.0,
     ):
         # Save training and test set paths
         self.train_set_path = train_set_path
@@ -50,7 +53,7 @@ class SquadDataset:
 
     def _add_end_index(self, df):
         """
-        Function that takes as input a partially-built SQuAD DataFrame 
+        Function that takes as input a partially-built SQuAD DataFrame
         (with at least ['context', 'answer', 'answer_start'] columns)
         and returns the same DataFrame with the new column 'answer_end',
         that consists of last answer character index
@@ -65,7 +68,7 @@ class SquadDataset:
 
     def _load_dataset(self, dataset_path, dataframe_path):
         """
-        Loads the SQuAD dataset into a Pandas DataFrame, 
+        Loads the SQuAD dataset into a Pandas DataFrame,
         starting from a specifically-formatted JSON
         """
         # Load the DataFrame, if it was already pickled before
@@ -197,7 +200,7 @@ class SquadDataManager:
             self.train_df, self.val_df = self._train_val_split(train_df, self.val_split)
             self.train_dataset = SquadTorchDataset(self.train_df)
             self.val_dataset = SquadTorchDataset(self.val_df)
-        
+
         # Preprocess the raw test dataset
         self.test_dataset = None
         if self.dataset.raw_test_df is not None:
@@ -207,7 +210,7 @@ class SquadDataManager:
 
     def _remove_lost_answers(self, df):
         """
-        Remove rows that contain incorrect answers, (either 
+        Remove rows that contain incorrect answers, (either
         because of the the tokenizer's truncation or because
         they were not correct in the first place)
         """

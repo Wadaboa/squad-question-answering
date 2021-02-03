@@ -1,13 +1,13 @@
 from operator import attrgetter
 
 import torch
-from tokenizers import Tokenizer
+from tokenizers import BertWordPieceTokenizer, Tokenizer
 from tokenizers.implementations import BaseTokenizer
 from tokenizers.models import WordLevel
-from tokenizers.normalizers import Sequence, StripAccents, Lowercase, Strip
+from tokenizers.normalizers import Lowercase, Sequence, Strip, StripAccents
+from tokenizers.pre_tokenizers import Punctuation
 from tokenizers.pre_tokenizers import Sequence as PreSequence
-from tokenizers.pre_tokenizers import Whitespace, Punctuation
-from tokenizers import BertWordPieceTokenizer
+from tokenizers.pre_tokenizers import Whitespace
 
 
 class SquadTokenizer:
@@ -82,7 +82,7 @@ class SquadTokenizer:
         """
         Given a list of word IDs, return two mask,
         one indicating the start of words and one
-        indicating the end of words, which should 
+        indicating the end of words, which should
         be used to ignore subwords
         """
         start_mask = torch.full(
@@ -120,7 +120,7 @@ class SquadTokenizer:
 
 class RecurrentSquadTokenizer(SquadTokenizer):
     """
-    Tokenizer and data collator to be used with a 
+    Tokenizer and data collator to be used with a
     recurrent-based model, which uses two different tokenizers
     (one for questions and one for contexts)
     """
@@ -322,7 +322,10 @@ def get_recurrent_tokenizer(
     context_tokenizer.normalizer = Sequence([StripAccents(), Lowercase(), Strip()])
     context_tokenizer.pre_tokenizer = PreSequence([Whitespace(), Punctuation()])
     context_tokenizer.enable_padding(
-        direction="right", pad_id=vocab[pad_token], pad_type_id=1, pad_token=pad_token,
+        direction="right",
+        pad_id=vocab[pad_token],
+        pad_type_id=1,
+        pad_token=pad_token,
     )
     context_tokenizer.enable_truncation(max_context_tokens)
 

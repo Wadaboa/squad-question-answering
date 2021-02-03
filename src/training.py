@@ -1,19 +1,15 @@
 import collections
-import time
-import os
 import importlib.util
+import os
+import time
 
 import numpy as np
 import torch
 import transformers
-from transformers.trainer_pt_utils import nested_detach
-from transformers.trainer_utils import (
-    EvalPrediction,
-    PredictionOutput,
-    speed_metrics,
-)
-from transformers.integrations import WandbCallback
 from transformers.file_utils import ENV_VARS_TRUE_VALUES, is_torch_tpu_available
+from transformers.integrations import WandbCallback
+from transformers.trainer_pt_utils import nested_detach
+from transformers.trainer_utils import EvalPrediction, PredictionOutput, speed_metrics
 
 import utils
 
@@ -109,7 +105,9 @@ class SquadTrainer(transformers.Trainer):
         # Convert labels and predictions into textual format,
         # for output and metrics purposes
         preds_dict = utils.from_words_to_text(
-            df, word_outputs.tolist(), indexes.tolist(),
+            df,
+            word_outputs.tolist(),
+            indexes.tolist(),
         )
         labels_dict = utils.from_words_to_text(df, labels.tolist(), indexes.tolist())
         return self.get_raw_scores(preds_dict, labels_dict)
