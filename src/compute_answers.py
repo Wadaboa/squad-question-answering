@@ -3,6 +3,7 @@ import os
 
 import numpy as np
 import torch
+import wandb
 
 import config
 import dataset
@@ -12,6 +13,8 @@ import tokenizer
 import training
 import utils
 
+
+FINAL_WANDB_RUN = "wadaboa/squad-qa/38gebtbt"
 RECURRENT_MODELS = ("baseline", "bidaf")
 TRANSFORMER_MODELS = ("bert", "distilbert", "electra")
 MODELS = {
@@ -21,6 +24,22 @@ MODELS = {
     "distilbert": model.QADistilBertModel,
     "electra": model.QAElectraModel,
 }
+MODELS_FOLDER = "results/models"
+ANSWERS_FOLDER = "results/answers"
+
+
+def load_from_wandb(model_type):
+    """
+    Download the given model weights from W&B
+    """
+    wandb.login(anonymous="must")
+    api = wandb.Api()
+    run = api.run(FINAL_WANDB_RUN)
+    checkpoint_name = f"{model_type}.bin"
+    checkpoint_file = run.file(checkpoint_name).download()
+    checkpoint_path = f"{MODELS_FOLDER}/{checkpoint_name}"
+    os.rename(checkpoint_file.name, checkpoint_path)
+    return checkpoint_path
 
 
 def load_recurrent_model(model_type, device):
@@ -77,29 +96,31 @@ def main(args):
     """
     Predict answers to the given test questions
     """
+    print("Loading dataset...")
     squad_dataset = dataset.SquadDataset(test_set_path=args.path)
     squad_tokenizer, squad_model = load_tokenizer_and_model(args.model, args.device)
     data_manager = dataset.SquadDataManager(
         squad_dataset, squad_tokenizer, device=args.device
     )
 
-    squad_model.load_state_dict(torch.load(args.weights, map_location=args.device))
-    print(f"Weights loaded from {args.weights}")
+    print("Downloading model weights from W&B...")
+    checkpoint_path = load_from_wandb(args.model)
+    print(f"Loading weights into the {args.model} model...")
+    squad_model.load_state_dict(torch.load(checkpoint_path, map_location=args.device))
 
+    print("Starting the prediction loop...")
     trainer_args = utils.get_default_trainer_args()(
         output_dir="./checkpoints",
-        per_device_eval_batch_size=args.batch,
+        per_device_eval_batch_size=1,
         no_cuda=(args.device == "cpu"),
     )
     trainer = training.SquadTrainer(
-        model=squad_model,
-        args=trainer_args,
-        data_collator=data_manager.tokenizer,
+        model=squad_model, args=trainer_args, data_collator=data_manager.tokenizer,
     )
-
     test_output = trainer.predict(data_manager.test_dataset)
+
+    print(f"Saving final answers to {args.results}...")
     utils.save_answers(args.results, test_output.predictions[-1])
-    print(f"Results saved in {args.results}")
 
 
 def parse_args():
@@ -122,22 +143,13 @@ def parse_args():
         help="model type to test",
     )
     parser.add_argument(
-        "-w",
-        "--weights",
-        help="path to the model checkpoint to load",
-    )
-    parser.add_argument(
         "-r",
         "--results",
-        default=f"{os.getcwd()}/results.json",
         help="where to save computed predictions",
     )
-    parser.add_argument(
-        "-b", "--batch", default=16, help="batch size for the test dataloader"
-    )
     args = parser.parse_args()
-    if args.weights is None:
-        args.weights = f"results/models/{args.model}.bin"
+    if args.results is None:
+        args.results = f"{ANSWERS_FOLDER}/{args.model}.json"
     return args
 
 
