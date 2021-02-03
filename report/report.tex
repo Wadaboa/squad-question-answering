@@ -96,21 +96,27 @@
 
 The tasks of Machine Comprehension (MC) and Question Answering (QA) have gained significant popularity over the past few years within the natural language processing and computer vision communities. Systems trained end-to-end now achieve great results on a variety of tasks in the text and image domains.
 
-In this work we address a question answering problem and, in particular, the Stanford Question Answer Dataset (SQuAD) problem: given a large collection of Wikipedia articles with associated questions, the goal is to identify the span of characters that contains the answer to the question.
+In this work, we address a question answering problem on the Stanford Question Answering Dataset (SQuAD) \cite{squad-explorer}: given a large collection of Wikipedia articles with associated questions, the goal is to identify the span of characters that contains the answer to the question.
 
-This project focuses on the SQuAD v1.1 dataset, that contains more than 100,000 question-answer pairs on more than 500 articles. Here each question has at least one associated answer, whereas in the SQuAD v2.0 dataset there are also questions with no answers at all.
+This project focuses on the SQuAD v1.1 dataset, that contains more than \num{100000} question-answer pairs on more than \num{500} articles. Here each question has at least one associated answer, whereas in the SQuAD v2.0 dataset there are also questions with no answer at all.
 
 In this work we implement and compare five different models:
 \begin{enumerate}
-  \item A naïve LSTM encoder-decoder that will act as our baseline
-  \item The Bi-Directional Attention Flow (BIDAF) network \cite{bidaf}
-  \item A model that wraps a pretrained Bidirectional Encoder Representations from Transformers (BERT) \cite{bert}, as language model, coupled with a custom output layer on top of it
-  \item A model that wraps DistilBERT \cite{distilbert}, a smaller general-purpose language representation model, 40\% smaller then BERT but with 97\% of its language understanding capabilities and 60\% faster
-  \item A model that wraps ELECTRA \cite{electra}, a more sample-efficient pre-training task called "replaced token detection"
+  \item A simple LSTM encoder with a naïve attention mechanism, that will act as our Baseline
+  \item The BiDAF (Bi-Directional Attention Flow) network \cite{bidaf}
+  \item A model that wraps a pre-trained BERT (Bidirectional Encoder Representations from Transformers) language model \cite{bert}
+  \item A model that wraps DistilBERT \cite{distilbert}, a distilled version of BERT
+  \item A model that wraps ELECTRA (Efficiently Learning an Encoder that Classifies Token Replacements Accurately) \cite{electra}, a BERT model trained with a more sample-efficient pre-training task
 \end{enumerate}
-For the last three models, we developed a modular reusable output layer, allowing us to implement different models by only change the language model levels (input, embedding and modelling).
+Each and every model shares a custom output module, built specifically for question answering tasks, that outputs character-level spans representing answers in contexts, for each question in a mini-batch.
 
-Our experimental evaluations show that our models achieve …………………………………………….
+Recurrent-based models (i.e. Baseline and BiDAF) are trained from scratch, while Transformer-based models (i.e. BERT, DistilBERT and ELECTRA) are pre-trained on tasks different than question answering and fine-tuned on the SQuAD dataset. Our fine-tuning approach consisted in using a single small learning rate for both the backbone (i.e. the pre-trained model) and our output module, even though it could be beneficial to try the following procedure:
+\begin{enumerate}
+  \item Start with a frozen backbone and train only the output module for a few epochs with a relatively high learning rate
+  \item Unfreeze the backbone and use progressive learning rates (smaller values near the start of the backbone and higher values towards the output layer)
+\end{enumerate}
+
+Our experimental evaluations show that the best recurrent-based module is BiDAF, since it achieves $68\%$ F1 and $55\%$ EM on the validation split of the whole dataset, while for Transformer-based models ELECTRA shines as the best performing one, with around $84\%$ F1 and $71\%$ EM. Such results are on par with those reported in the corresponding models' papers.
 
 \chapter{Background}\label{chap:background}
 
@@ -118,7 +124,7 @@ As already described above, the question answering task is based on the idea of 
 
 Since the input data is of textual form and the latest models for the task are all based on neural architectures, there is the need to encode such text into a numeric representation. As of today, there are two main approaches to embed words in numerical format: sparse embeddings, like TF-IDF \cite{tf-idf} and PPMI \cite{ppmi}, and the modern dense embeddings, such as Word2Vec \cite{word2vec} and GloVe \cite{glove}. In the latter case, embeddings for each word in the input vocabulary are usually computed with shallow encoders.
 
-These emebddings are then used as inputs for models specialized in processing sequential inputs. Nowadays, such models are mostly based on the Transformer architecture \cite{transformers}, which has the attention mechanism at its core. Instead, before this revolution, NLP competition's leaderboards were mostly populated by models based on recurrent and convolutional modules.
+These embeddings are then used as inputs for models specialized in processing sequential inputs. Nowadays, such models are mostly based on the Transformer architecture \cite{transformers}, which has the attention mechanism at its core. Instead, before this revolution, NLP competition's leaderboards were mostly populated by models based on recurrent and convolutional modules.
 
 The most influential recurrent networks are LSTMs \cite{lstm} and GRUs \cite{gru}. They are both based on processing sequential inputs and they keep an evolving series of hidden states, such that the output $h_t^{(0)}$ is a function of $h_{t-1}^{(0)}$ and the input $x_t$ at position $t$. Recurrent layers can also be stacked to increase the capacity of the network: in that case, $h_t^{(0)}$ would act as an input to $h_t^{(1)}$, i.e. the first hidden state of the next depth-wise layer, and the same goes for the successive layers, as shown in figure \ref{fig:recurrent}.
 
@@ -147,103 +153,111 @@ While Transformers may always seem the way to go, since they throw away all the 
 
 \chapter{System description}\label{chap:system-description}
 
-In this work we implement three distinct models: a naïve LSTM encoder-decoder that will act as our baseline, the Bi-Directional Attention Flow (BIDAF) network \cite{bidaf} and some models that wraps a pretrained Bidirectional Encoder Representations from Transformers (BERT) \cite{bert} or variations of it, specifically DistilBert \cite{distilbert} and Electra \cite{electra}, as language models, coupled with a custom output layer on top of it.
+In this work, we implemented five different models, grouped together in two categories:
+\begin{itemize}
+  \item Recurrent-based models: comprising a simple LSTM encoder with a naïve attention mechanism (referred to as Baseline), along with the BiDAF network
+  \item Transformer-based models: comprising wraps of language models, like BERT, DistilBERT and ELECTRA
+\end{itemize}
 
-Each model is trained on the SQuAD v1.1 training set and evaluated on the SQuAD v1.1 dev set, available on the github repository of the \href{https://github.com/rajpurkar/SQuAD-explorer/tree/master/}{SQuAD project}.
+In order to perform an effective models’ comparison, models from each group share the same input and output layer specifications.
 
-The models’ evaluation is carried out on the same preprocessed data: indeed, we defined a preprocessing pipeline, applied it to the training and dev set once and the resulting dataset is fed to each model. (CONTROLLARE QUI – mi pare che per bert abbiamo tokenizzato diversamente)
-
-In order to perform an effective models’ comparison, each model shares the same input and output layer: what changes is the language model (embedding + attention layers) and the modeling layer.
-
-The following is a detailed description of the models.
+The following is a detailed description of the models. Beware that each in each model section we report everything but what happens in the output module, which is described once in \ref{sec:output-module}.
 
 \section{Recurrent-based models}\label{sec:recurrent-models}
 \subsection{Baseline}\label{subsec:baseline}
 
-The baseline model embedding layer performs a standard word level embedding on both questions, and context, than proceeds projection this embeddings into a fixed hidden size dimesion.
-Regarding the modeling it is composed by a single recurrent encoder, which is given both questions and contexts as two separate inputs. Then, all the hidden states of a single question are averaged together (over the embedding dimension) so as to obtain a single vector which should encode the semantic information of the question at the sentence level. This aggregated question vector is then element-wise multiplied to each context token latent representation, so as to perform some kind of query-aware context encoding. Finally, the query-aware context vectors are passed onto another recurrent module and used as inputs for the end token classifier, while the query-aware context vectors are directly used as input for the start token classifier.
+The following is a simple description of the flow followed by questions and contexts, when given in input to the Baseline model:
+\begin{enumerate}
+  \item Embedding: it performs a standard word-level embedding on both questions and contexts (see \ref{sec:embeddings})
+  \item Projection: embedded inputs are down-sampled into a fixed hidden size dimension, to reduce computation
+  \item Token encoding: a single uni-directional recurrent encoder, which processes questions and contexts as two separate inputs
+  \item Naïve attention: all the hidden states of a single question are averaged together (over the embedding dimension) so as to obtain a single vector which should encode the semantic information of the question at the sentence level
+  \item Query-aware context encoding: the aggregated question vector is element-wise multiplied to each context token latent representation
+\end{enumerate}
 
 \subsection{BiDAF}\label{subsec:bidaf}
 
-The BiDAF model is composed of four major layers, each one defines a more in depth representation of the question, context input couple:
+The BiDAF model \cite{bidaf,bidaf-medium} is composed by the following sub-modules, where each one produces a more in-depth representation w.r.t. the previous stage, of the (question, context) tuple:
 \begin{enumerate}
-  \item Embedding layers
-  \item Attention layers
-  \item Modeling layer
-  \item Output layer.
+  \item Embedding: simple word-level embeddings, even though the original BiDAF paper also leverages character-level embeddings (which are known to help with OOV words): given that this addition seems to increase the metrics only by a couple of percentage points while requiring a lot more computation and structure to work optimally, we decided to get rid of it 
+  \item Projection: as done in the Baseline model
+  \item Highway: the last step in the embedding process is performed by a Highway network \cite{highway-network}, which is usually used to balance the contributions of word and character embeddings, but in our case, lacking the character embedding part, it serves as a training stabilizer
+  \item Contextual embeddings: a single layer bidirectional LSTM is used to refine the word-level embeddings for both questions and contexts separately, by taking into account the surrounding words for each token
+  \item Attention: this step is the heart of the BiDAF model. First of all, it computes a similarity matrix between questions and contexts as $\langle w, [q,c,q\cdot c]\rangle$, where $w$ is the weight matrix of a fully-connected layer, $q$ and $c$ represent the contextual embeddings of questions and contexts, respectively, $[\cdot]$ represents concatenation, $\langle\cdot\rangle$ is the dot product and $\cdot$ is element-wise multiplication. This similarity matrix represents how much each question and context words are grammatically and semantically alike and it's used as one of the inputs given to both BiDAF's peculiar attention modules, i.e. Context-To-Query (C2Q) and Query-To-Context (Q2C):
+  \begin{enumerate}
+    \item C2Q: represents which question words are most relevant to each context words, which outputs a vector $\tilde{c}$
+    \item Q2C: signifies which context words have the closest similarity to one of the question words and are hence critical for answering the query, which outputs a vector $\tilde{q}$
+  \end{enumerate}
+  
+  The last step in the attention module outputs a query-aware context vector, given by $g=\langle w, [c, \tilde{c}, c \cdot \tilde{c}, c\cdot \tilde{q}] \rangle$, where $w$ is th weight matrix of a fully-connected layer
+  \item Modeling: the modeling module is structured as a two-layer bidirectional LSTM, which takes as input the combined vector $g$
 \end{enumerate}
 
-\begin{figure}[!ht]
+\begin{figure}[h]
   \center
-  \includegraphics[width=\linewidth]{bidaf}
-  \caption{General BiDAF model workflow (image courtesy of \cite{bidaf-img})}
+  \includegraphics[width=0.85\linewidth]{bidaf}
+  \caption{BiDAF model (image courtesy of \cite{bidaf})}
   \label{fig:bidaf}
 \end{figure}
 
-We tried to follow the original paper \cite{bidaf} as closely as possible as presented in Figure \ref{fig:bidaf}, but in the end we made some minor changes.
-The Embedding layers of our model perform word level embedding on both question and context tokens using a sligthly modified GloVe embedding, see \ref{sec:tokenization} and \ref{sec:embeddings}, then the achieved embedding is projected into a fixed size hidden dimesion using a linear layer without bias, similarly to the baseline model. The last step is performed by a highway network \cite{highway-network} which is usually used to balance the contributions of words and character embedding, but in our case we used it to ease the training process, lacking the character embedding part, we removed it because it seem to increase the metrics by only a couple of percentage points, while requiring a lot of additional computation and structure to work optimally.
-
-After the highway network we delve into the heart of BiDAF which takes as input the result of a contextual embedding layer, shared by contexts and query, formed by a single layer bidirectional LSTM. With this two outputs we can compute the similarity matrix of context and queries, as the product of weights of a linear layer, without bias, and the concatenation of question,context and element-wise multiplication of the formers. This similarity matrix represents how much each question and context words are grammatically and semantically alike, it is used as base for the evaluation of both BiDAF peculiar attentions, Context-To-Query (C2Q) and Query-To-Context (Q2C). This attentions represent which query words are most relevant to each context words and vicerversa.
-The last step in the attention layers is called "megamerge" which is the concatenation of four embeddings:
-\begin{itemize}
-  \item Context embeddings of the contextual layer
-  \item Context-To-Query values
-  \item Element-wise multiplication of Context-To-Query values and context embeddings
-  \item Element-wise multiplication of Query-To-Context values and context embeddings
-\end{itemize}
-
-The modeling layer is structured as two bidirectional LSTMs, the first one has two layers and takes as input the "megamerge",the second one has one layer and runs on the output of the first, this specific result is used to create a differentiation in the modeling to aid the search of the start token's index and end token's index of the answer.
-
-The output layer receives as inputs the concatenation of "megamerge" and the corresponding modeling outputs, see \ref{sec:output-layer}
-
 \section{Transformer-based models}\label{sec:transformer-models}
 \subsection{BERT model}\label{subsec:bert-model}
-All the transformer models are based on BERT \cite{bert}, which is a language model, composed of a multi-layer bidirectional transformer encoder \cite{transformers} (we used it's base implementation which has 12 transformer layers and 768 has hidden size).
+All the Transformer models are based on BERT \cite{bert}, which is a language model composed by a multi-layer bidirectional encoder-decoder structure \cite{transformers}. Our experiments are all performed using the base, uncased implementation of BERT, which has $12$ Transformer layers and $768$ as its hidden size.
 
-The peculiarity of it's transformer's architecture allows the model to learn the context of a word based on all of its surrounding at the same time, not just as a sequential read.
-This reflects in it's pre-training, which is composed of two tasks:
+The peculiarity of it's Transformer architecture allows the model to learn the context of a word based on all of its surroundings, at the same time, without having to perform a sequential scan of the input, as done in standard RNNs. This is reflected in its pre-training, which is composed of two tasks:
 \begin{itemize}
-  \item Masked LM (MLM)
-  \item Next Sentence Prediction (NSP)
+  \item Masked Language Modeling (MLM): at a high level, it is performed by masking $15\%$ of the words in each sequence and replacing them with a $[MASK]$ token, so that the model is required to predict the original value of the masked words, using the available ones
+  \item Next Sentence Prediction (NSP): achieved giving as input to the model a pair of sentences (formatted as in \ref{sec:tokenization}), which are in $50\%$ of the cases two subsequent sentences or a random picked pair otherwise, so that the model is asked to identify if the second sentence follows the first one in the pair
 \end{itemize}
-Simplistically Masked LM is performed masking $15\%$ of the words in each sequence replacing them whit a $[MASK]$ token, the model is required to predict the original value of the masked words, using the available ones.
-Next Sentence Prediction is achieved giving as input to the model a pair of sentences formatted as in \ref{sec:tokenization} in the case of transformer tokenization, which are in $50\%$ of the cases two subsequent sentences, and a random picked couple otherwise, the model is asked to identify if the following sentence is subsequent to the first.
-BERT model are trained using both task together with the goal of minimize the combined loss \cite{bert-article}.
+The first task, MLM, is used to gain a detailed understanding of the processed language, while the second task, NSP, is used to let the model have a broader comprehension of semantic connections.
+
+BERT is trained using both tasks together, with the goal of minimizing the combined loss.
 
 \subsection{DistilBERT model}\label{subsec:distilbert-model}
-BERT performance, as for the majority of large-scale language models, are inevitably intertwined with their number of parameters, DistilBERT \cite{distilbert} tries to reduce this number using a technique called \texttt{distillation} which consist in training a smaller "student" network to mimic the full output of the big "teacher" model \cite{distillation}. Specifically DistilBERT has about half the parameters of BERT and retains $95\%$ of its performance on GLUE, its distillation uses \texttt{Kullback-Leibler loss} as explained in \cite{distilbert-article}.
+BERT performances, as for the majority of large-scale language models, are inevitably intertwined with their number of parameters. DistilBERT \cite{distilbert,distilbert-article} tries to reduce this number using a technique called distillation, which consists in training a smaller "student" network to mimic the full output of the big "teacher" model \cite{distillation}. Specifically, DistilBERT has about half the parameters of BERT and retains $95\%$ of its performance on the GLUE benchmark \cite{glue}.
 
 \subsection{ELECTRA model}\label{subsec:electra-model}
-ELECTRA (Efficiently Learning an Encoder that Classifies Token Replacements Accurately) \cite{electra} as an architecture equal to BERT, it's only difference is using a new pre-training approach, which aims to outperform MLM strategy.
-It's structure is composed of three steps:
+ELECTRA (Efficiently Learning an Encoder that Classifies Token Replacements Accurately) \cite{electra} has the same architecture as BERT, but uses a new pre-training approach which aims to outperform the MLM strategy with RTD (Replaced Token Detection). Its structure is composed of three steps, shown in figure \ref{fig:electra}:
 \begin{enumerate}
-  \item Given an input sequence randomly replace tokens with a $[MASK]$ token
-  \item The \texttt{generator} (a small MLM) predicts the original token for the masked one
-  \item The new sequence with the replaced token is given to the \texttt{discriminator} (ELECTRA) which objective is to identify for each token if it is original or replaced
+  \item Given an input sequence, randomly replace tokens with a $[MASK]$ token
+  \item The generator (that performs a small MLM) predicts the original token for the masked one
+  \item The new sequence (with the replaced token) is given to the discriminator (ELECTRA), whose objective is to identify if each token is part of the original sequence or if it has been replaced by the generator
 \end{enumerate}
-At the end of the training the \texttt{discriminator} is saved and the \texttt{generator} is thrown away.
-This approach allows to compute the loss over all input tokens and not only on the masked ones, which is the key difference between the two approaches \cite{electra-article}.
+At the end of training the generator is not useful anymore, so that only the discriminator needs to be saved.
+This new pre-training task allows the model to compute the loss over each and every input token (not only on the masked ones, as done in BERT), which is what sets apart ELECTRA in terms of convergence speed and performance on downstream problems.
 
-\section{Output layer}\label{sec:output-layer}
-The output layer is composed of two linear layers, one for the identification of the start index and one for the end one. They receive two different inputs, the end token one being the result of the computation of a single layer recurrent encoder on the start input. We then compute the softmax, s.t. we obtain a start and an end probability for each token in the context.
-The final part is the search of the correct section of context that forms the answer, this is made finding the feasible intervall with maximum combined probabilities (respecting the assumption that the start index must precede the end one).
+\begin{figure}[h]
+  \center
+  \includegraphics[width=0.85\linewidth]{electra-pretraining}
+  \caption{ELECTRA RTD pre-training task (image courtesy of \cite{electra})}
+  \label{fig:electra}
+\end{figure}
+
+\section{Output module}\label{sec:output-module}
+The output module is composed by two fully-connected layers, used to identify the start and end token indexes of the answer in the given context. The start index classifier directly receives the output of the previous modules (e.g. in the BiDAF model that would correspond to the output of the modeling layer), while the same output vector is first passed into a single layer recurrent encoder before entering into the end index classifier. This additional RNN is used to implicitly enforce the constraint that the end index should follow the start one.
+
+We then compute a softmax over both logits, so as to obtain a start and end index probability for each token in the context. To find the correct section of context that forms the answer, we compute the joint probability distribution (by multiplying each pair of start/end probabilities, for each token) and we take the start/end indexes corresponding to the maximum combined probability (respecting the assumption that the start index must precede the end one).
+
+Finally, thanks to HuggingFace's tokenizers \cite{tokenizers}, we are able to simply convert start/end indexes over tokens to their corresponding values over original characters' positions.
+
+The output layer is also responsible for the computation of the loss, which is a simple mean of cross-entropy losses of the start and end token probabilities.
 
 \chapter{Experimental setup and results}\label{chap:experiments}
 
 \section{Data handling}\label{sec:data-handling}
-Given the JSON training set, we decided to parse it into a suitable tabular data structure, which turned to be useful even for subsequent pre-processing tasks. In particular, since each context has multiple question/answer pairs and each question can have multiple answers, we allocated one row for each context/question/answer triple, thus replicating the same context and question multiple times, in order to consider it as a separate example.
+Given the JSON training set, we decided to parse it into a suitable tabular data structure, which turned out to be useful even for subsequent pre-processing tasks. In particular, since each context has multiple question/answer pairs and each question can have multiple answers, we allocated one row for each context/question/answer triple, thus replicating the same context and question multiple times, in order to consider it as a separate example.
 
 Regarding the splitting strategy for the dataset, we went for a simple holdout, thus setting aside $20\%$ of the whole dataset for validation purposes. The way the validation set is built guarantees that the entire set of rows referencing to the same context is kept into the same split, thus avoiding unjustifiable boosting of results.
 
 As an additional test, we evaluated all of our models on the official SQuAD v1.1 dev set. The main difference between this dataset and the training one is that the same question can have multiple correct answers.
 
-Moreover, final models are re-trained on the whole dataset (by merging training and validation splits), so as to simulate the cross-validation strategy.
+Moreover, models are re-trained on the whole dataset (by merging training and validation splits), so as to simulate the cross-validation strategy. About re-training, results showed that this process only gives marginal improvements at the expense of a much more difficult way of choosing the best weights snapshots (since there are no validation metrics to observe, thus leaving only training loss available). Because of this, results reported in \ref{sec:results} do not show such training runs, but only their training/validation counterparts.  
 
 \section{Tokenization}\label{sec:tokenization}
 Tokenization has the following meaning: given a string of text, its task is to split it into sub-strings (called tokens), depending on the chosen algorithm. Different models call for different tokenization pipelines. In our case, we have two macro-categories:
 \begin{enumerate}
   \item Recurrent-based models tokenizer: splits words by whitespaces and punctuations, removes accents and applies a lowercasing function to all the tokens. Moreover, questions are padded (not truncated), while contexts are truncated and padded. Taking inspiration from \cite{max-context-tokens}, the maximum number of tokens for truncating contexts was fixed to $300$.
-  \item Transformer-based models tokenizer: splits words using the WordPiece algorithm (introduced in \cite{wordpiece}), removes accents and applies a lowercasing function to all the tokens, while also merging together questions and contexts as $[CLS] q_1 q_2 \dots q_n [SEP] c_1 c_2 \dots c_m [SEP]$ (it leverages the special tokens $[CLS]$ and $[SEP]$). Moreover, the combined question/context sentence is truncated to a maximum number of tokens ($512$, as in \cite{bert}) and padded to the right.
+  \item Transformer-based models tokenizer: splits words using the WordPiece algorithm (introduced in \cite{wordpiece}), normalizes unicode and foreign characters, removes accents and applies a lowercasing function to all the tokens, while also merging together questions and contexts as $[CLS] q_1 q_2 \dots q_n [SEP] c_1 c_2 \dots c_m [SEP]$ (it leverages the special tokens $[CLS]$ and $[SEP]$). Moreover, the combined question/context sentence is truncated to a maximum number of tokens ($512$, as in \cite{bert}) and padded to the right.
 \end{enumerate}
 Tokenization happens on the fly at the batch level, thus enabling us to perform dynamic padding (based on the longest sequence in a batch) and avoiding the pre-tokenization overhead.
 
@@ -258,12 +272,12 @@ In recurrent-based models, tokens are numerically encoded using the standard Glo
 
 We additionally embedded two more tokens (not present in the standard GloVe vocabulary):
 \begin{enumerate}
-  \item $[PAD]$: the corresponding vector contains all zeros
-  \item $[UNK]$: the corresponding vector, which is used to handle OOV (Out Of Vocabulary) words, is the mean of all the GloVe vectors, as reported by Pennington (one of GloVe's authors)
+  \item $[PAD]$: the corresponding vector, which is used to pad sequences to a fixed lenght, contains all zeros
+  \item $[UNK]$: the corresponding vector, which is used to handle OOV (Out Of Vocabulary) words, is the mean of all the GloVe vectors, as reported by Pennington (one of GloVe's authors) \cite{unk}
         \begin{displayquote}I've found that just taking an average of all or a subset of the word vectors produces a good unknown vector \end{displayquote}
 \end{enumerate}
 
-In Transformer-based models, we instead rely on the wrapped language models of the HuggingFace library \cite{hugginface}, so that there is no need to manually handle token embeddings.
+In Transformer-based models, we instead rely on the wrapped language models of the HuggingFace library \cite{huggingface}, so that there is no need to manually handle token embeddings.
 
 \section{Metrics}
 Models are evaluated at the end of each epoch and metrics are computed for both the training and validation set. In our case, the validation set was mainly used to track models' performance on unseen data, in order to avoid overfitting problems.
@@ -275,32 +289,32 @@ Since the same question can have multiple ground truths (specifically, in the de
 Moreover, we noticed that the training set does not have multiple answers for the same question, so this "nearest answer" approach comes into play only at inference time: this is actually the desired behavior, since at training time the described technique could lead to an unstable learning process, given by the non-stationarity of the target distribution.
 
 \section{Environment}
-The main third-party libraries on which the project is based on are PyTorch \cite{pytorch}, an open source machine learning framework with automatic differentiation and eager execution, and HuggingFace \cite{hugginface}, a library to build, train and deploy state of the art NLP models.
+The main third-party libraries on which the project is based on are PyTorch \cite{pytorch}, an open source machine learning framework with automatic differentiation and eager execution, and HuggingFace \cite{huggingface}, a library to build, train and deploy state of the art NLP models.
 
 All of the training and validation processes were executed on Google Colaboratory \cite{colab}, a platform that gives the possibility to exploit some computational resources for free. In particular, Colab allows you to select a GPU runtime, that boosts the training time of neural models and most of the times we were assigned an NVIDIA Tesla T4 GPU, with 16GB of RAM.
 
 Training and evaluation metrics, along with model checkpoints and results, are directly logged into a W\&B project \cite{wandb}, which is openly accessible \href{https://wandb.ai/wadaboa/squad-qa}{here}.
 
-\section{Results}
-Table \ref{table:results} shows the best results obtained in the training, validation and testing phases of each model, with the hyperparameters listed in table \ref{table:hyperparameters}. In particular, by "training" we mean a learning run over the whole dataset (training and validation splits combined together), by "validation" we mean the evaluation of a model on the validation split described in \ref{sec:data-handling}, while "testing" represents metrics obtained on the official SQuAD v1.1 dev set with models trained on the whole dataset.
+\section{Results}\label{sec:results}
+Table \ref{table:results} shows the best results obtained in the training, validation and testing phases of each model, with the hyperparameters listed in table \ref{table:hyperparameters}. In particular, by "training"/"validation" we mean metrics computed on the training/validation splits described in \ref{sec:data-handling}, while "testing" represents metrics obtained on the official SQuAD v1.1 dev set.
 
 \begin{table}[h]
   \center
   \begin{tabular}{|c|c|c|c|c|c|c|}
     \hline
     \multirow{2}{*}{}   & \multicolumn{2}{c|}{\textbf{Training}} & \multicolumn{2}{c|}{\textbf{Validation}} & \multicolumn{2}{c|}{\textbf{Test}}                                                          \\ \cline{2-7}
-                        & \textbf{F1} (\%)                       & \textbf{EM} (\%)                         & \textbf{F1} (\%)                   & \textbf{EM} (\%) & \textbf{F1} (\%) & \textbf{EM} (\%) \\ \hline
-    \textbf{Baseline}   &                                        &                                          & $37.28$                            & $26.33$          &                  &                  \\ \hline
-    \textbf{BiDAF}      & $65.23$                                & $45.61$                                  & $68.05$                            & $55.31$          & $73.54$          & $63.14$          \\ \hline
-    \textbf{BERT}       & $70.96$                                & $54.21$                                  & $79.82$                            & $68.03$          & $83.46$          & $74.36$          \\ \hline
-    \textbf{DistilBERT} &                                        &                                          & $78.82$                            & $66.17$          &                  &                  \\ \hline
-    \textbf{ELECTRA}    &                                        &                                          & $84.19$                            & $72.23$          &                  &                  \\ \hline
+                        & \textbf{F1} (\%) & \textbf{EM} (\%) & \textbf{F1} (\%) & \textbf{EM} (\%) & \textbf{F1} (\%) & \textbf{EM} (\%) \\ \hline
+    \textbf{Baseline}   & $36.21$ & $21.27$ & $37.19$ & $26.47$ & $33.69$ & $21.70$ \\ \hline
+    \textbf{BiDAF}      & $63.42$ & $43.27$ & $68.40$ & $55.31$ & $71.15$ & $60.09$ \\ \hline
+    \textbf{BERT}       & $73.68$ & $56.14$ & $80.28$ & $67.80$ & $83.17$ & $74.17$ \\ \hline
+    \textbf{DistilBERT} & $73.72$ & $55.95$ & $79.26$ & $66.97$ & $82.44$ & $73.64$ \\ \hline
+    \textbf{ELECTRA}    & $76.42$ & $58.89$ & $84.45$ & $71.83$ & $88.27$ & $80.60$ \\ \hline
   \end{tabular}
   \caption{Best results}
   \label{table:results}
 \end{table}
 
-The hyperparameters listed in table \ref{table:hyperparameters} were mainly taken from the corresponding models' paper, in order to have a well-estabilished benchmark.
+The hyperparameters listed in table \ref{table:hyperparameters} were mainly taken from the corresponding models' papers, in order to have a well-estabilished benchmark, even though some of them were adjusted based on available resources (e.g. the batch size).
 
 \begin{table}[h]
   \center
