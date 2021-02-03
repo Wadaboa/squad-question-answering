@@ -73,7 +73,7 @@
 \title{
   {{\large{\textsc{Alma Mater Studiorum $\cdot$ University of Bologna}}}}
   \rule{\textwidth}{0.4pt}\vspace{3mm}
-  \textbf{Question answering on the SQuAD dataset}
+  \textbf{Question answering on the SQuAD dataset\footnote{The code for the project is publicly available on \href{https://github.com/Wadaboa/squad-question-answering}{GitHub}}}
   \begin{figure}[!htb]
     \centering
     \includegraphics[width = 100pt]{squad-logo}
@@ -124,7 +124,7 @@ As already described above, the question answering task is based on the idea of 
 
 Since the input data is of textual form and the latest models for the task are all based on neural architectures, there is the need to encode such text into a numeric representation. As of today, there are two main approaches to embed words in numerical format: sparse embeddings, like TF-IDF \cite{tf-idf} and PPMI \cite{ppmi}, and the modern dense embeddings, such as Word2Vec \cite{word2vec} and GloVe \cite{glove}. In the latter case, embeddings for each word in the input vocabulary are usually computed with shallow encoders.
 
-These embeddings are then used as inputs for models specialized in processing sequential inputs. Nowadays, such models are mostly based on the Transformer architecture \cite{transformers}, which has the attention mechanism at its core. Instead, before this revolution, NLP competition's leaderboards were mostly populated by models based on recurrent and convolutional modules.
+These embeddings are then used as inputs for models specialized in processing sequences. Nowadays, such models are mostly based on the Transformer architecture \cite{transformers}, which has the attention mechanism at its core. Instead, before this revolution, NLP competition's leaderboards were mostly populated by models based on recurrent and convolutional modules.
 
 The most influential recurrent networks are LSTMs \cite{lstm} and GRUs \cite{gru}. They are both based on processing sequential inputs and they keep an evolving series of hidden states, such that the output $h_t^{(0)}$ is a function of $h_{t-1}^{(0)}$ and the input $x_t$ at position $t$. Recurrent layers can also be stacked to increase the capacity of the network: in that case, $h_t^{(0)}$ would act as an input to $h_t^{(1)}$, i.e. the first hidden state of the next depth-wise layer, and the same goes for the successive layers, as shown in figure \ref{fig:recurrent}.
 
@@ -159,9 +159,9 @@ In this work, we implemented five different models, grouped together in two cate
   \item Transformer-based models: comprising wraps of language models, like BERT, DistilBERT and ELECTRA
 \end{itemize}
 
-In order to perform an effective models’ comparison, models from each group share the same input and output layer specifications.
+In order to perform an effective comparison, models from each group share the same input and output layer specifications.
 
-The following is a detailed description of the models. Beware that each in each model section we report everything but what happens in the output module, which is described once in \ref{sec:output-module}.
+The following is a detailed description of the models. Beware that in each model section we report everything but what happens in the output module, which is described once in \ref{sec:output-module}.
 
 \section{Recurrent-based models}\label{sec:recurrent-models}
 \subsection{Baseline}\label{subsec:baseline}
@@ -171,15 +171,14 @@ The following is a simple description of the flow followed by questions and cont
   \item Embedding: it performs a standard word-level embedding on both questions and contexts (see \ref{sec:embeddings})
   \item Projection: embedded inputs are down-sampled into a fixed hidden size dimension, to reduce computation
   \item Token encoding: a single uni-directional recurrent encoder, which processes questions and contexts as two separate inputs
-  \item Naïve attention: all the hidden states of a single question are averaged together (over the embedding dimension) so as to obtain a single vector which should encode the semantic information of the question at the sentence level
-  \item Query-aware context encoding: the aggregated question vector is element-wise multiplied to each context token latent representation
+  \item Naïve attention: all the hidden states of a single question are averaged together (over the embedding dimension) so as to obtain a single vector which should encode the semantic information of the question at the sentence level; then, the aggregated question vector is element-wise multiplied to each context token latent representation
 \end{enumerate}
 
 \subsection{BiDAF}\label{subsec:bidaf}
 
 The BiDAF model \cite{bidaf,bidaf-medium} is composed by the following sub-modules, where each one produces a more in-depth representation w.r.t. the previous stage, of the (question, context) tuple:
 \begin{enumerate}
-  \item Embedding: simple word-level embeddings, even though the original BiDAF paper also leverages character-level embeddings (which are known to help with OOV words): given that this addition seems to increase the metrics only by a couple of percentage points while requiring a lot more computation and structure to work optimally, we decided to get rid of it 
+  \item Embedding: simple word-level embeddings, even though the original BiDAF paper also leverages character-level embeddings (which are known to help with OOV words): given that this addition seems to increase the metrics only by a couple of percentage points while requiring a lot more computation and structure to work optimally, we didn't implement it 
   \item Projection: as done in the Baseline model
   \item Highway: the last step in the embedding process is performed by a Highway network \cite{highway-network}, which is usually used to balance the contributions of word and character embeddings, but in our case, lacking the character embedding part, it serves as a training stabilizer
   \item Contextual embeddings: a single layer bidirectional LSTM is used to refine the word-level embeddings for both questions and contexts separately, by taking into account the surrounding words for each token
@@ -189,7 +188,7 @@ The BiDAF model \cite{bidaf,bidaf-medium} is composed by the following sub-modul
     \item Q2C: signifies which context words have the closest similarity to one of the question words and are hence critical for answering the query, which outputs a vector $\tilde{q}$
   \end{enumerate}
   
-  The last step in the attention module outputs a query-aware context vector, given by $g=\langle w, [c, \tilde{c}, c \cdot \tilde{c}, c\cdot \tilde{q}] \rangle$, where $w$ is th weight matrix of a fully-connected layer
+  The last step in the attention module outputs a query-aware context vector, given by $g=\langle w, [c, \tilde{c}, c \cdot \tilde{c}, c\cdot \tilde{q}] \rangle$, where $w$ is the weight matrix of a fully-connected layer
   \item Modeling: the modeling module is structured as a two-layer bidirectional LSTM, which takes as input the combined vector $g$
 \end{enumerate}
 
@@ -201,10 +200,10 @@ The BiDAF model \cite{bidaf,bidaf-medium} is composed by the following sub-modul
 \end{figure}
 
 \section{Transformer-based models}\label{sec:transformer-models}
-\subsection{BERT model}\label{subsec:bert-model}
+\subsection{BERT}\label{subsec:bert-model}
 All the Transformer models are based on BERT \cite{bert}, which is a language model composed by a multi-layer bidirectional encoder-decoder structure \cite{transformers}. Our experiments are all performed using the base, uncased implementation of BERT, which has $12$ Transformer layers and $768$ as its hidden size.
 
-The peculiarity of it's Transformer architecture allows the model to learn the context of a word based on all of its surroundings, at the same time, without having to perform a sequential scan of the input, as done in standard RNNs. This is reflected in its pre-training, which is composed of two tasks:
+The peculiarity of its Transformer architecture allows the model to learn the context of a word based on all of its surroundings, at the same time, without having to perform a sequential scan of the input, as done in standard RNNs. This is reflected in its pre-training, which is composed of two tasks:
 \begin{itemize}
   \item Masked Language Modeling (MLM): at a high level, it is performed by masking $15\%$ of the words in each sequence and replacing them with a $[MASK]$ token, so that the model is required to predict the original value of the masked words, using the available ones
   \item Next Sentence Prediction (NSP): achieved giving as input to the model a pair of sentences (formatted as in \ref{sec:tokenization}), which are in $50\%$ of the cases two subsequent sentences or a random picked pair otherwise, so that the model is asked to identify if the second sentence follows the first one in the pair
@@ -213,10 +212,10 @@ The first task, MLM, is used to gain a detailed understanding of the processed l
 
 BERT is trained using both tasks together, with the goal of minimizing the combined loss.
 
-\subsection{DistilBERT model}\label{subsec:distilbert-model}
+\subsection{DistilBERT}\label{subsec:distilbert-model}
 BERT performances, as for the majority of large-scale language models, are inevitably intertwined with their number of parameters. DistilBERT \cite{distilbert,distilbert-article} tries to reduce this number using a technique called distillation, which consists in training a smaller "student" network to mimic the full output of the big "teacher" model \cite{distillation}. Specifically, DistilBERT has about half the parameters of BERT and retains $95\%$ of its performance on the GLUE benchmark \cite{glue}.
 
-\subsection{ELECTRA model}\label{subsec:electra-model}
+\subsection{ELECTRA}\label{subsec:electra-model}
 ELECTRA (Efficiently Learning an Encoder that Classifies Token Replacements Accurately) \cite{electra} has the same architecture as BERT, but uses a new pre-training approach which aims to outperform the MLM strategy with RTD (Replaced Token Detection). Its structure is composed of three steps, shown in figure \ref{fig:electra}:
 \begin{enumerate}
   \item Given an input sequence, randomly replace tokens with a $[MASK]$ token
@@ -256,8 +255,8 @@ Moreover, models are re-trained on the whole dataset (by merging training and va
 \section{Tokenization}\label{sec:tokenization}
 Tokenization has the following meaning: given a string of text, its task is to split it into sub-strings (called tokens), depending on the chosen algorithm. Different models call for different tokenization pipelines. In our case, we have two macro-categories:
 \begin{enumerate}
-  \item Recurrent-based models tokenizer: splits words by whitespaces and punctuations, removes accents and applies a lowercasing function to all the tokens. Moreover, questions are padded (not truncated), while contexts are truncated and padded. Taking inspiration from \cite{max-context-tokens}, the maximum number of tokens for truncating contexts was fixed to $300$.
-  \item Transformer-based models tokenizer: splits words using the WordPiece algorithm (introduced in \cite{wordpiece}), normalizes unicode and foreign characters, removes accents and applies a lowercasing function to all the tokens, while also merging together questions and contexts as $[CLS] q_1 q_2 \dots q_n [SEP] c_1 c_2 \dots c_m [SEP]$ (it leverages the special tokens $[CLS]$ and $[SEP]$). Moreover, the combined question/context sentence is truncated to a maximum number of tokens ($512$, as in \cite{bert}) and padded to the right.
+  \item Recurrent-based models tokenizer: splits words by whitespaces and punctuations, removes accents and applies a lowercasing function to all the tokens. Moreover, questions are padded (not truncated), while contexts are truncated and padded. Taking inspiration from \cite{max-context-tokens}, the maximum number of tokens for truncating contexts was fixed to $300$
+  \item Transformer-based models tokenizer: splits words using the WordPiece algorithm (introduced in \cite{wordpiece}), normalizes unicode and foreign characters, removes accents and applies a lowercasing function to all the tokens, while also merging together questions and contexts as $[CLS] q_1 q_2 \dots q_n [SEP] c_1 c_2 \dots c_m [SEP]$ (it leverages the special tokens $[CLS]$ and $[SEP]$). Moreover, the combined question/context sentence is truncated to a maximum number of tokens ($512$, as in \cite{bert}) and padded to the right
 \end{enumerate}
 Tokenization happens on the fly at the batch level, thus enabling us to perform dynamic padding (based on the longest sequence in a batch) and avoiding the pre-tokenization overhead.
 
@@ -308,7 +307,7 @@ Table \ref{table:results} shows the best results obtained in the training, valid
     \textbf{BiDAF}      & $63.42$ & $43.27$ & $68.40$ & $55.31$ & $71.15$ & $60.09$ \\ \hline
     \textbf{BERT}       & $73.68$ & $56.14$ & $80.28$ & $67.80$ & $83.17$ & $74.17$ \\ \hline
     \textbf{DistilBERT} & $73.72$ & $55.95$ & $79.26$ & $66.97$ & $82.44$ & $73.64$ \\ \hline
-    \textbf{ELECTRA}    & $76.42$ & $58.89$ & $84.45$ & $71.83$ & $88.27$ & $80.60$ \\ \hline
+    \textbf{ELECTRA}    & \textbf{76.42} & \textbf{58.89} & \textbf{84.45} & \textbf{71.83} & \textbf{88.27} & \textbf{80.60} \\ \hline
   \end{tabular}
   \caption{Best results}
   \label{table:results}
@@ -331,9 +330,46 @@ The hyperparameters listed in table \ref{table:hyperparameters} were mainly take
   \label{table:hyperparameters}
 \end{table}
 
+
 \chapter{Analysis of results}\label{chap:analysis-results}
+For the results analysis, we focused on misclassified examples on the SQuAD v1.1 dev set. In particular, table \ref{table:errors} shows some errors (defined as those answers whose EM is zero) that are common in both of our best architectures, i.e. BiDAF and ELECTRA.
+
+The total number of errors with BiDAF is exactly \num{4222}, while ELECTRA halves this metric to \num{2062}. Instead, the amount of common errors, i.e. the questions whose predicted answer is wrong with both models, is equal to \num{1535} (almost covering all of ELECTRA's errors).
+
+By analyzing the common errors, we can focus on the hardest examples in the dataset. In order to categorize such misclassifications, we manually observed a random subset of $50$ elements and reported (in table \ref{table:errors}) the most frequent and interesting patterns.
+
+\begin{longtable}{m{0.30\linewidth}|m{0.6\linewidth}}
+  \textbf{Error type} & \textbf{Example} \\ \hline \endhead
+  Word boundaries \newline \small{(answers that are correct but are either too specific or too generic)} & \textbf{Context}: In cases where the criminalized behavior is pure speech, civil disobedience can consist simply of engaging in the forbidden speech. An example would be WBAI's broadcasting the track "Filthy Words" from a George Carlin comedy album, which eventually led to the 1978 Supreme Court case of FCC v. Pacifica Foundation. Threatening government officials is another classic way of expressing defiance toward the government and unwillingness to stand for its policies. For example, Joseph Haas was arrested for allegedly sending an email to the Lebanon, New Hampshire city councilors stating, "Wise up or die." \newline
+  \textbf{Question}: What is one criminal behavior that is hard to stop by authorities? \newline
+  \textbf{Answers}: [pure speech, forbidden speech, engaging in forbidden speech] \newline
+  \textbf{Predictions}: [ELECTRA] speech [BiDAF] civil disobedience can consist simply of engaging in forbidden speech \\ \hline
+  Question comprehension \newline \small{(answers that clearly show one of the models was not able to fully capture the meaning of the question)} & \textbf{Context}: Although Kenya is the biggest and most advanced economy in east and central Africa, and has an affluent urban minority, it has a Human Development Index (HDI) of 0.519, ranked 145 out of 186 in the world. As of 2005, 17.7\% of Kenyans lived on less than \$1.25 a day. The important agricultural sector is one of the least developed and largely inefficient, employing 75\% of the workforce compared to less than 3\% in the food secure developed countries. Kenya is usually classified as a frontier market or occasionally an emerging market, but it is not one of the least developed countries. \newline
+  \textbf{Question}: What is Kenya's HDI? \newline
+  \textbf{Answers}: [0519 ranked 145 out of 186 in world, 0519] \newline
+  \textbf{Predictions}: [ELECTRA] human development index [BiDAF] human development index \\ \hline
+  Antonyms \newline \small{(answers for which one of the models predicted the exact opposite meaning of the correct one)} & \textbf{Context}: Luther secretly returned to Wittenberg on 6 March 1522. He wrote to the Elector: "During my absence, Satan has entered my sheepfold, and committed ravages which I cannot repair by writing, but only by my personal presence and living word." For eight days in Lent, beginning on Invocavit Sunday, 9 March, Luther preached eight sermons, which became known as the "Invocavit Sermons". In these sermons, he hammered home the primacy of core Christian values such as love, patience, charity, and freedom, and reminded the citizens to trust God's word rather than violence to bring about necessary change. \newline
+  \textbf{Question}: How did Luther want people to bring about change? \newline
+  \textbf{Answers}: [trust gods word, love patience charity and freedom] \newline
+  \textbf{Predictions}: [ELECTRA] violence [BiDAF] reminded citizens to trust gods word rather than violence \\ \hline
+  Mathematical operations \newline \small{(answers that show models' limitations in producing sound outputs when math operations are expressed in natural language)} & \textbf{Context}: In July 1888, Brown and Peck negotiated a licensing deal with George Westinghouse for Tesla's polyphase induction motor and transformer designs for \$60,000 in cash and stock and a royalty of \$2.50 per AC horsepower produced by each motor. Westinghouse also hired Tesla for one year for the large fee of \$2,000 (\$52,700 in today's dollars) per month to be a consultant at the Westinghouse Electric \& Manufacturing Company's Pittsburgh labs. \newline
+  \textbf{Question}: How much did Westinghouse pay for Tesla's designs? \newline
+  \textbf{Answers}: [60000 in cash and stock and royalty of 250 per ac horsepower produced by each motor, 60000 in cash and stock and royalty] \newline
+  \textbf{Predictions}: [ELECTRA] 60000 [BiDAF] 60000 
+  \label{table:errors}
+\end{longtable}
 
 \chapter{Discussion}\label{chap:discussion}
+
+In this work, we addressed the problem of question answering on the SQuAD v1.1 dataset, by leveraging both recurrent-based models and Transformer-based ones. Our Baseline is outperformed by every other architecture, as expected, and models based on BERT are able to almost reach human level performance, when evaluated on the F1 score metric (for reference, that is around $90\%$). It's worth to notice that current SoTA models are all based on ensembling techniques, even though the gap with good single models is getting smaller and smaller.
+
+We mainly worked on implementing custom recurrent-based models, such as the BiDAF network, and on giving the same output interface to each and every model, so as to gain modularity and fairness in the evaluation metrics of the backbone.
+
+Evaluation was done on the training and validation splits of the whole dataset and on a separate test set, which is the official SQuAD v1.1 dev set: our results are on par with those reported in the literature.
+
+Further interesting analysis could be performed on the produced outputs, to reach a better understanding of the implemented models. Anyway, conducted experiments show that both recurrent-based and Transformer-based models perform similar errors, such as those on word boundaries and question comprehension. The total number of errors, in the SQuAD v1.1 dev set, that are common in every model is exactly \num{940}.
+
+Future improvements could be related to including character embeddings in the BiDAF architecture (as done in the original paper), using a better fine-tuning procedure for Transformer-based models (as described in \ref{chap:introduction}) and handling OOV words with more sophisticated procedures for recurrent-based models. Other things to try are the following: stacking a BiDAF architecture on top of a BERT one or simply modifying the output layer to include other modules, like convolutional ones.
 
 \printbibliography
 \end{document}
