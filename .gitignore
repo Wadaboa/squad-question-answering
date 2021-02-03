@@ -419,3 +419,4 @@ __latexindent_temp*
 
 # Ignore checkpoints (too heavy)
 results/models/**
+!results/models/.gitkeep
