@@ -416,3 +416,6 @@ TSWLatexianTemp*
 
 # Other latex files
 __latexindent_temp*
+
+# Ignore checkpoints (too heavy)
+results/models/**
