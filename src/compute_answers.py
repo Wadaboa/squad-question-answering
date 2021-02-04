@@ -4,6 +4,7 @@ import os
 import numpy as np
 import torch
 import wandb
+from transformers.trainer_utils import set_seed
 
 import config
 import dataset
@@ -14,7 +15,7 @@ import training
 import utils
 
 
-FINAL_WANDB_RUN = "wadaboa/squad-qa/38gebtbt"
+FINAL_WANDB_RUN = "wadaboa/squad-qa/final"
 RECURRENT_MODELS = ("baseline", "bidaf")
 TRANSFORMER_MODELS = ("bert", "distilbert", "electra")
 MODELS = {
@@ -32,13 +33,14 @@ def load_from_wandb(model_type):
     """
     Download the given model weights from W&B
     """
-    wandb.login(anonymous="must")
-    api = wandb.Api()
-    run = api.run(FINAL_WANDB_RUN)
     checkpoint_name = f"{model_type}.bin"
-    checkpoint_file = run.file(checkpoint_name).download()
     checkpoint_path = f"{MODELS_FOLDER}/{checkpoint_name}"
-    os.rename(checkpoint_file.name, checkpoint_path)
+    if not os.path.exists(checkpoint_path):
+        wandb.login(anonymous="must")
+        api = wandb.Api()
+        run = api.run(FINAL_WANDB_RUN)
+        checkpoint_file = run.file(checkpoint_name).download()
+        os.rename(checkpoint_file.name, checkpoint_path)
     return checkpoint_path
 
 
@@ -98,6 +100,7 @@ def main(args):
     """
     print("Loading dataset...")
     squad_dataset = dataset.SquadDataset(test_set_path=args.path)
+    print("Loading model and tokenizer...")
     squad_tokenizer, squad_model = load_tokenizer_and_model(args.model, args.device)
     data_manager = dataset.SquadDataManager(
         squad_dataset, squad_tokenizer, device=args.device
@@ -143,9 +146,7 @@ def parse_args():
         help="model type to test",
     )
     parser.add_argument(
-        "-r",
-        "--results",
-        help="where to save computed predictions",
+        "-r", "--results", help="where to save computed predictions",
     )
     args = parser.parse_args()
     if args.results is None:
@@ -154,5 +155,6 @@ def parse_args():
 
 
 if __name__ == "__main__":
+    set_seed(config.RANDOM_SEED)
     args = parse_args()
     main(args)

@@ -17,10 +17,7 @@ class SquadDataset:
     JSON_RECORD_PATH = ["data", "paragraphs", "qas", "answers"]
 
     def __init__(
-        self,
-        train_set_path=None,
-        test_set_path=None,
-        subset=1.0,
+        self, train_set_path=None, test_set_path=None, subset=1.0,
     ):
         # Save training and test set paths
         self.train_set_path = train_set_path
@@ -255,6 +252,9 @@ class SquadDataManager:
         """
         Group answers to the same question into a single row
         """
+        if "answer" not in df.columns:
+            return df
+
         return (
             df.groupby(["question_id", "question", "title", "context_id", "context"])
             .agg({"answer": list, "answer_start": list, "answer_end": list})
